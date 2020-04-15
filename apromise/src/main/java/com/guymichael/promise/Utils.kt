@@ -1,4 +1,4 @@
-package com.guymichael.apromise.promise
+package com.guymichael.promise
 
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Scheduler
@@ -15,8 +15,7 @@ object Utils {
     @JvmOverloads
     fun periodic(periodMs: Long
             , scheduler: Scheduler = Schedulers.computation()
-            , consumer: Consumer<Long>
-    ): Disposable {
+            , consumer: Consumer<Long>): Disposable {
 
         return Observable.interval(periodMs, TimeUnit.MILLISECONDS, scheduler)
             .retry()

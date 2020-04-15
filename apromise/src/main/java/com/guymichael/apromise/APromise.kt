@@ -1,16 +1,19 @@
 package com.guymichael.apromise
 
 import android.app.Activity
+import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.Toast
-import com.guymichael.apromise.promise.Promise
-import com.guymichael.apromise.promise.Promise.Companion.SimpleCallbackException
+import com.guymichael.promise.Promise
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
+import io.reactivex.rxjava3.core.Scheduler
 import io.reactivex.rxjava3.core.Single
+import io.reactivex.rxjava3.disposables.Disposable
 import io.reactivex.rxjava3.functions.Consumer
 import io.reactivex.rxjava3.functions.Function
 import io.reactivex.rxjava3.functions.Predicate
+import io.reactivex.rxjava3.schedulers.Schedulers
 import java.lang.ref.WeakReference
 
 /**
@@ -74,10 +77,11 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
      * @param autoCancel if true, executes with auto cancel - [executeWhileAlive]
      */
     @JvmOverloads
-    fun executeAutoHandleErrorMessage(context: Activity, autoCancel: Boolean = false) {
+    fun executeAutoHandleErrorMessage(context: Activity, autoCancel: Boolean = false): Disposable {
         this.contextRef = WeakReference(context)
         this.failSilently = false
-        if (autoCancel) {
+
+        return if (autoCancel) {
             executeWhileAlive(context)
         } else {
             execute()
@@ -89,23 +93,24 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
      * @param autoCancel if true, executes with auto cancel - [executeWhileAlive]
      */
     @JvmOverloads
-    fun executeAutoHandleErrorMessage(view: View, autoCancel: Boolean = false) {
-        AndroidUtils.getActivity(view)?.let { executeAutoHandleErrorMessage(it, autoCancel) }
+    fun executeAutoHandleErrorMessage(view: View, autoCancel: Boolean = false): Disposable {
+        return AndroidUtils.getActivity(view)?.let {
+            executeAutoHandleErrorMessage(it, autoCancel)
+        } ?: DisposedDisposable
     }
 
     /** cancels when context is destroyed
      * auto cancels sometime after activity is destroyed. See [cancel] */
-    fun executeWhileAlive(context: Activity) {
-        autoCancel(context).execute()
+    fun executeWhileAlive(context: Activity): Disposable {
+        return autoCancel(context).execute()
     }
 
-    /** cancelled when view is destroyed / detached from window
-     * @return true if started (context wasn't null already) */
-    fun executeWhileAlive(view: View): Boolean {
+    /** cancelled when view is destroyed / detached from window.
+     * Note: does not execute if view's context is (already) null */
+    fun executeWhileAlive(view: View): Disposable {//TODO THINK fail the promise(!) ? cancel (hasn't been executed)
         return AndroidUtils.getActivity(view)?.let { activity ->
             autoCancel(view).executeWhileAlive(activity)
-            true
-        } ?: false
+        } ?: DisposedDisposable
     }
 
     fun doOnExecutionOrReject(consumer: Consumer<Activity>, context: Activity): APromise<T> {
@@ -117,8 +122,18 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         }
     }
 
-    fun doOnExecutionOrReject(consumer: (Activity) -> Unit, context: Activity): APromise<T> {
-        return doOnExecutionOrReject(Consumer(consumer), context)
+    /** skips this consumer (only) if the context became null */
+    fun <A : Activity> doOnExecutionWithContext(context: A, consumer: Consumer<A>): APromise<T> {
+        val ref = WeakReference(context)
+
+        return doOnExecution {
+            getContext(ref)?.let { consumer.accept(it) } //or skip
+        }
+    }
+
+    /** skips this consumer (only) if the context became null */
+    fun <A : Activity> doOnExecutionWithContext(context: A, consumer: (A) -> Unit): APromise<T> {
+        return doOnExecutionWithContext(context, Consumer(consumer))
     }
 
     fun <A : Activity> thenWithContextOrReject(context: A, consumer: Consumer<Pair<A, T>>) : APromise<T> {
@@ -377,12 +392,28 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
 
 
     /*overridden method just for the response type*/
+    override fun <R> thenAwait(function: Function<T, Promise<R>>, executeOn: Scheduler?, resumeOn: Scheduler?): APromise<R> {
+        return super.thenAwait(function, executeOn, resumeOn) as APromise<R>
+    }
+
     override fun <R> thenAwait(function: Function<T, Promise<R>>): APromise<R> {
         return super.thenAwait(function) as APromise<R>
     }
 
+    override fun <R> thenAwait(function: (T) -> Promise<R>, executeOn: Scheduler?, resumeOn: Scheduler?): APromise<R> {
+        return super.thenAwait(function, executeOn, resumeOn) as APromise<R>
+    }
+
     override fun <R> thenAwait(function: (T) -> Promise<R>): APromise<R> {
-        return super.thenAwait(Function(function)) as APromise<R>
+        return super.thenAwait(function) as APromise<R>
+    }
+
+    override fun <R> thenAwaitOrReject(function: (T) -> Promise<R>?, executeOn: Scheduler?, resumeOn: Scheduler?) : APromise<R> {
+        return super.thenAwaitOrReject(function, executeOn, resumeOn) as APromise<R>
+    }
+
+    override fun <R> thenAwaitOrCancel(function: (T) -> Promise<R>?, executeOn: Scheduler?, resumeOn: Scheduler?) : APromise<R> {
+        return super.thenAwaitOrCancel(function, executeOn, resumeOn) as APromise<R>
     }
 
     override fun <R> thenAwaitOrReject(function: (T) -> Promise<R>?) : APromise<R> {
@@ -391,6 +422,13 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
 
     override fun <R> thenAwaitOrCancel(function: (T) -> Promise<R>?) : APromise<R> {
         return super.thenAwaitOrCancel(function) as APromise<R>
+    }
+
+    @JvmOverloads
+    fun <R> thenAsyncAwait(function: (T) -> Promise<R>
+            , executeOn: Scheduler? = Schedulers.computation()
+            , resumeOn: Scheduler? = AndroidSchedulers.mainThread()): APromise<R> {
+        return super.thenAwait(function, executeOn, resumeOn) as APromise<R>
     }
 
     override fun <R> thenMap(function: Function<T, R>): APromise<R> {
@@ -457,6 +495,14 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         return super.catchResume(Function(function)) as APromise<T>
     }
 
+    fun <A : Activity> catchResumeWithContext(context: A, function: (Pair<A, Throwable>) -> Promise<T>) : APromise<T> {
+        val contextRef = WeakReference(context)
+
+        return catchResume { error -> getContext(contextRef)?.let { it as? A }?.let {
+            function.invoke(Pair(it, error))
+        } ?: reject(Throwable("APromise - null context")) }
+    }
+
     override fun catchIgnore(consumer: Consumer<Throwable>) : APromise<Unit> {
         return super.catchIgnore(consumer) as APromise<Unit>
     }
@@ -517,30 +563,49 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     /**
-     * delays and resumes on the calling thread, **unless current thread has no prepared Looper, then resumes on the main thread/Looper !**.
+     * delays (on computation scheduler) and resumes on the calling thread,
+     * **unless current thread has no prepared Looper, then resumes on the main thread/Looper !**.
      * Note that the super [Promise.delay] doesn't resumes to the calling thread, and this method aims to fix that
      */
     fun delay(ms: Long): APromise<T> {
         //single's delay() changes to computation scheduler!! See it's implementation
         //fix - resume on current thread
         //THINK create Looper for current thread if doesn't have one yet (instead of using main thread/looper)
-        return super.delay(ms, AndroidSchedulers.from(Looper.myLooper() ?: Looper.getMainLooper())) as APromise<T>
+        return super.delay(ms, androidSchedulerOrMain()) as APromise<T>
     }
 
     /**
-     * delays and resumes on the calling thread, **unless current thread has no prepared Looper, then resumes on the main thread/Looper !**.
-     * Note that the super [Promise.delay] doesn't resumes to the calling thread, and this method aims to fix that
+     * timeouts if hasn't been resolved after 'ms' time and resumes on the calling thread,
+     * **unless current thread has no prepared Looper, then resumes on the main thread/Looper !**.
+     * Note that the super [Promise.timeout] doesn't resumes to the calling thread, and this method aims to fix that
      */
     fun timeout(ms: Long): APromise<T> {
         //single's timeout() changes to computation scheduler!! See it's implementation
         //fix - resume on current thread
         //THINK create Looper for current thread if doesn't have one yet (instead of using main thread/looper)
-        return super.timeout(ms, AndroidSchedulers.from(Looper.myLooper() ?: Looper.getMainLooper())) as APromise<T>
+        return super.timeout(ms, androidSchedulerOrMain()) as APromise<T>
+    }
+
+    override fun thenOn(scheduler: Scheduler, consumer: (T) -> Unit): APromise<T> {
+        return super.thenOn(scheduler, consumer) as APromise<T>
+    }
+
+    fun thenOnMainThread(consumer: (T) -> Unit): APromise<T> {
+        return super.thenOn(AndroidSchedulers.mainThread(), consumer) as APromise<T>
     }
 
     /** calls 'consumer' when this Promise finishes, with boolean 'isResolved' - true if Promise succeeded, false if failed or cancelled */
     override fun finally(consumer: (Boolean) -> Unit): APromise<T> {
         return super.finally(consumer) as APromise<T>
+    }
+
+    /** skips this consumer (only) if the context became null */
+    fun <A : Activity> finallyWithContext(context: A, consumer: (Pair<A, Boolean>) -> Unit) : APromise<T> {
+        val ref = WeakReference(context)
+
+        return super.finally { resolved ->
+            getContext(ref)?.let { consumer.invoke(it to resolved) } //or skip
+        } as APromise<T>
     }
 
     override fun doOnExecution(runnable: Runnable): APromise<T> {
@@ -558,7 +623,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         }
 
         /**
-         * Note: catches may receive [Throwable] of type [SimpleCallbackException] with a nullable [R] as it's 'result'
+         * Note: catches may receive [Throwable] of type [Promise.SimpleCallbackException] with a nullable [R] as it's 'result'
          */
         @JvmStatic
         fun <R, CALLBACK: Any?> ofCallback(call: (Promise.Companion.SimpleCallback<R>) -> CALLBACK
@@ -567,7 +632,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         }
 
         /**
-         * Note: catches may receive [Throwable] of type [SimpleCallbackException] with a nullable [R] as it's 'result'
+         * Note: catches may receive [Throwable] of type [Promise.SimpleCallbackException] with a nullable [R] as it's 'result'
          */
         @JvmStatic
         fun <R: Any?> ofCallback(call: (Promise.Companion.SimpleCallback<R>) -> Unit): APromise<R> {
@@ -587,8 +652,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         }
 
         fun <R, S> ofConditionOrIgnore(supplier: () -> R?, predicate: (R) -> Boolean
-                                       , function: (R) -> Promise<S>
-        ) : APromise<Unit> {
+                                       , function: (R) -> Promise<S>) : APromise<Unit> {
             return ofConditionOrReject(supplier, predicate)
                     .thenAwait(Function(function))
                     .catchIgnoreUnmetCondition() as APromise<Unit>
@@ -670,6 +734,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
             return ofOrCancel(ref::get)
         }
 
+        /** A 'resolved' promise with initial value */
         fun <R> of(r: R) : APromise<R> {
             return APromise(singleOfCondition({ r }, { true }))
         }
@@ -681,7 +746,70 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
 
         @JvmStatic
         fun ofDelay(ms: Long): APromise<Unit> {
+            //note that this one is different than the parent Promise's, as APromise.delay() adds logic
             return of().delay(ms)
+        }
+
+        /** Delays on current thread, or main thread if current thread's [Looper] isn't prepared */
+        fun delay(ms: Long, consumer: () -> Unit): Disposable {
+            //note that this one is different than the parent Promise's, as APromise.delay() adds logic
+            return ofDelay(ms).then { consumer() }.execute()
+        }
+
+        fun delayOn(ms: Long, scheduler: Scheduler, consumer: () -> Unit): Disposable {
+            //note that this one is different than the parent Promise's, as APromise.delay() adds logic
+            return of().delay(ms, scheduler).then { consumer() }.execute()
+        }
+
+        @JvmStatic
+        fun delayOnMainThread(ms: Long, consumer: () -> Unit): Disposable {
+            //note that this one is different than the parent Promise's, as APromise.delay() adds logic
+            return delayOn(ms, AndroidSchedulers.mainThread(), consumer)
+        }
+
+        /**
+         * Runs a task at the end of Android's [Handler] execution queue. Same as calling [APromise.delay] with `ms = 0`
+         *
+         * This is somewhat similar to JavaScript's `setTimeout(0)`.
+         *
+         * This is most helpful for UI-related tasks, when you need to run something from a UI callback
+         * (e.g. [View.onFinishInflate]), but do it **'non-blocking'** (in this example, a `View`'s size might be
+         * measured only **after** the [View.onFinishInflate] callback, so this method/utility is helpful for
+         * that case).
+         *
+         * Detailed explanation: Android's thread [Handler] works with tasks.
+         * When posting a task with `0` delay, that task is scheduled to run at the end of
+         * the (tasks) execution queue, which is exactly how this method works.
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun postAtEndOfExecutionQueue(scheduler: Scheduler = androidSchedulerOrMain()
+                , consumer: () -> Unit): Disposable {
+            return delayOn(0, scheduler, consumer)
+        }
+
+        /**
+         * Runs a task at the end of Android's **main** thread / [Handler] execution queue.
+         *
+         * This is same as calling [delayOnMainThread] with `ms = 0`
+         *
+         * See [postAtEndOfExecutionQueue]
+         */
+        @JvmStatic
+        fun postAtEndOfMainExecutionQueue(consumer: () -> Unit): Disposable {
+            return delayOnMainThread(0, consumer)
+        }
+
+        @JvmStatic
+        fun delayWhileAlive(view: View, ms: Long, consumer: () -> Unit): Disposable {
+            //note that this one is different than the parent Promise's, as APromise.delay() adds logic
+            return ofDelay(ms).then { consumer() }.executeWhileAlive(view)
+        }
+
+        @JvmStatic
+        fun delayWhileAlive(activity: Activity, ms: Long, consumer: () -> Unit): Disposable {
+            //note that this one is different than the parent Promise's, as APromise.delay() adds logic
+            return ofDelay(ms).then { consumer() }.executeWhileAlive(activity)
         }
 
         /** keeps a [WeakReference] of 'r' while delaying and cancels if garbage-collected */
@@ -716,6 +844,33 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         }
 
         @JvmStatic
+        fun on(scheduler: Scheduler) : APromise<Unit> {
+            return APromise(Single.just(Unit).observeOn(scheduler))
+        }
+
+        /** @param supplier may throw exceptions, which will lead to standard rejection */
+        @JvmOverloads
+        fun <R> ofAsync(supplier: () -> R
+                , executeOn: Scheduler? = null, resumeOn: Scheduler? = null) : APromise<R> {
+            return APromise(singleOfAsyncAwait(supplier, executeOn, resumeOn))
+        }
+
+        /** @param supplier may throw exceptions, which will lead to standard rejection */
+        @JvmOverloads
+        fun <R> ofAsyncAwait(supplier: () -> R
+                , executeOn: Scheduler? = Schedulers.computation(), resumeOn: Scheduler? = AndroidSchedulers.mainThread()) : APromise<R> {
+            return APromise(singleOfAsyncAwait(supplier, executeOn, resumeOn))
+        }
+
+        /** @param supplier may throw exceptions, which will lead to standard rejection */
+        @JvmOverloads
+        fun <R> ofAsyncAwaitOrReject(supplier: () -> R?
+                , executeOn: Scheduler = Schedulers.computation(), resumeOn: Scheduler? = AndroidSchedulers.mainThread()) : APromise<R> {
+            return on(executeOn).thenMapOrReject({ supplier() })
+                .run { resumeOn?.let { thenOn(it){} } ?: this }
+        }
+
+        @JvmStatic
         fun setGlobalAutoErrorHandler(handler: (Activity, Throwable) -> Unit) {
             globalErrorHandler = handler
         }
@@ -732,4 +887,13 @@ private fun <A : Activity> getContext(ref: WeakReference<A>) : A? {
     }
 
     return context
+}
+
+private fun androidSchedulerOrMain(looperOrNull: Looper? = Looper.myLooper()): Scheduler {
+    return looperOrNull?.let(AndroidSchedulers::from) ?: AndroidSchedulers.mainThread()
+}
+
+private object DisposedDisposable : Disposable {
+    override fun isDisposed() = true
+    override fun dispose() {}
 }

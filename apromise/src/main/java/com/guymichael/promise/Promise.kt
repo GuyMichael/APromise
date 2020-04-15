@@ -1,21 +1,22 @@
-package com.guymichael.apromise.promise
+package com.guymichael.promise
 
 import com.guymichael.apromise.BuildConfig
+import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.core.Scheduler
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.disposables.Disposable
 import io.reactivex.rxjava3.functions.Consumer
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import io.reactivex.rxjava3.functions.Function
 import io.reactivex.rxjava3.functions.Predicate
 import io.reactivex.rxjava3.plugins.RxJavaPlugins
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 open class Promise<T>(single: Single<T>) {
     val single: Single<T>
     private var onErrorConsumer: Consumer<in Throwable>? = null
     private var asyncErrorConsumer: Consumer<in Throwable>? = null
-    private var promiseSubscriber: Disposable? = null
+    private var promiseSubscriber: Disposable? = null//held (always and only) by the last promise in the chain
     private var isResolved: Boolean = false
     protected var cancelExecutor: () -> Unit = {
         promiseSubscriber?.apply {
@@ -59,11 +60,11 @@ open class Promise<T>(single: Single<T>) {
             .letIf({ bindCancel }, ::bindCancelExecution)
     }
 
-    fun execute() {
+    fun execute(): Disposable {
         checkIfExecutedAndThrow()
 
         this.promiseSubscriber = this.single.subscribe({
-            isResolved = true
+            isResolved = true//THINK needed as well as the onSuccess one (inside init)
             Logger.dLazy(this@Promise.javaClass) { "Promise resolved: ${if (it is Any) it.javaClass.simpleName else ""} : $it" }
 
         }, { error ->
@@ -80,8 +81,15 @@ open class Promise<T>(single: Single<T>) {
                     ?: Logger.e(this@Promise.javaClass, "uncaught error: ${error.message}")
             }
 
-            promiseSubscriber?.takeIf { !it.isDisposed }?.dispose()//THINK should dispose?
+            promiseSubscriber?.takeIf { !it.isDisposed }?.dispose()//THINK should not dispose on errors, should probably remove this line
         })
+
+        return object : Disposable {
+            //because we just executed the promise ('this') so it is the last one in chain.
+            //note that (only) here we can assume that promiseSubscriber isn't null
+            override fun isDisposed() = promiseSubscriber?.isDisposed != false //if null assume was reset
+            override fun dispose() = cancelExecutor()
+        }
     }
 
     @Throws(Exception::class)
@@ -92,7 +100,7 @@ open class Promise<T>(single: Single<T>) {
 
     private fun checkIfExecutedAndThrow() {
         if (isExecuted()) {
-            if (BuildConfig.DEBUG) {
+            if(BuildConfig.DEBUG) {
                 throw IllegalStateException("Promise: thenAndExecute() should only be called once, and after it only consumer/runnable then called are allowed")
             }
         }
@@ -112,28 +120,52 @@ open class Promise<T>(single: Single<T>) {
 
 
 
-    open fun <R> thenAwait(function: Function<T, Promise<R>>) : Promise<R> {
+    open fun <R> thenAwait(function: Function<T, Promise<R>>
+            , executeOn: Scheduler? = null, resumeOn: Scheduler? = null) : Promise<R> {
+
         // we want to have an error consumer, so that it will pass on to future promises.
         // The fact that we have a separate asyncErrorConsumer helps both for having a late-init error consumer
         // and for maintaining the correct order of 'catch' sequence
         return catch { e -> asyncErrorConsumer?.takeIf { e !is SilentRejectionException }?.accept(e) }
-            .createInstance(singleOfAsync(function))
+            .createInstance(singleOfAsync(function, executeOn, resumeOn))
+    }
+
+    open fun <R> thenAwait(function: (T) -> Promise<R>
+           , executeOn: Scheduler? = null, resumeOn: Scheduler? = null) : Promise<R> {
+
+        return thenAwait(Function(function), executeOn, resumeOn)
+    }
+
+    open fun <R> thenAwaitOrReject(function: (T) -> Promise<R>?
+            , executeOn: Scheduler? = null, resumeOn: Scheduler? = null) : Promise<R> {
+
+        return thenAwait(Function {
+            function(it) ?: reject(Throwable("thenAwaitOrReject(): 'function' returned null"))
+        }, executeOn, resumeOn)
+    }
+
+    open fun <R> thenAwaitOrCancel(function: (T) -> Promise<R>?
+            , executeOn: Scheduler? = null, resumeOn: Scheduler? = null) : Promise<R> {
+
+        return thenAwait(Function {
+            function(it) ?: cancelImmediately("thenAwaitOrReject(): 'function' returned null")
+        }, executeOn, resumeOn)
+    }
+
+    open fun <R> thenAwait(function: Function<T, Promise<R>>) : Promise<R> {
+        return thenAwait(function, null, null)
     }
 
     open fun <R> thenAwait(function: (T) -> Promise<R>) : Promise<R> {
-        return thenAwait(Function(function))
+        return thenAwait(Function(function), null, null)
     }
 
     open fun <R> thenAwaitOrReject(function: (T) -> Promise<R>?) : Promise<R> {
-        return thenAwait(Function {
-            function(it) ?: reject(Throwable("thenAwaitOrReject(): 'function' returned null"))
-        })
+        return thenAwaitOrReject(function, null, null)
     }
 
     open fun <R> thenAwaitOrCancel(function: (T) -> Promise<R>?) : Promise<R> {
-        return thenAwait(Function {
-            function(it) ?: cancelImmediately("thenAwaitOrReject(): 'function' returned null")
-        })
+        return thenAwaitOrCancel(function , null, null)
     }
 
     open fun <R> thenMap(function: Function<T, R>) : Promise<R> {
@@ -319,14 +351,19 @@ open class Promise<T>(single: Single<T>) {
 
     /** delays and resumes by default on the Computation Scheduler (!) due to Single.delay impl. */
     open fun delay(ms: Long, resumeOn: Scheduler? = null): Promise<T> {
-        if (ms == 0L) { return this }
-
+        // note: we can't do:  if (ms == 0L) { return this }
+        //       as some schedulers (e.g. Android's) work differently with 0 values,
+        //       like posting the action at the end of the execution queue (like JavaScript's setTimeout))
         return createInstance(singleOfDelay(ms, resumeOn))
     }
 
-    /** timeouts and resumes by default on the Computation Scheduler (!) due to Single.delay impl. */
+    /** timeouts if hasn't been resolved after 'ms' time, and resumes by default on the Computation Scheduler (!) due to Single.delay impl. */
     open fun timeout(ms: Long, resumeOn: Scheduler? = null): Promise<T> {
         return createInstance(singleOfTimeout(ms, resumeOn)) //THINK if 0 return? maybe it's smart to actually use 0
+    }
+
+    open fun thenOn(scheduler: Scheduler, consumer: (T) -> Unit): Promise<T> {
+        return createInstance(singleOfScheduler(scheduler)).then(consumer)
     }
 
     /** calls 'consumer' when this Promise finishes, with boolean 'isResolved' - true if Promise succeeded, false if failed or cancelled */
@@ -361,6 +398,9 @@ open class Promise<T>(single: Single<T>) {
     /* actions with other promises */
 
     //TODO errors in one promise stop the others. A parallel single should not know about the others
+    /**
+     * Resolved as soon as one of these promises resolves, cancelling the other one
+     */
     infix fun or(other: Promise<T>): Promise<T> {
         return createInstance(
             this.single.doOnSuccess {
@@ -386,12 +426,12 @@ open class Promise<T>(single: Single<T>) {
     /*fun toMaybe(): Maybe<T> {//THINK what about all our listeners?
         return Maybe.fromSingle(this.single)
     }*/
-
-    /*fun toObservable(): Observable<T> {//THINK what about all our listeners?
-        return this.single.toObservable().doOnSubscribe {
+    /** NOTICE: error handling set on Promise not supported ('catch's aren't passed over to the observable) */
+    fun toObservable(): Observable<T> {//THINK what about all our listeners/error-handlers?
+        return this.single.toObservable()/*.doOnSubscribe {
             execute()
-        }
-    }*/
+        }*/
+    }
 
 
 
@@ -432,9 +472,16 @@ open class Promise<T>(single: Single<T>) {
         }
     }
 
-    private fun <R> singleOfAsync(function: Function<T, Promise<R>>) : Single<R> {
-        return this.single.flatMap { t ->
-            function.apply(t).let { nextPromise ->
+    private fun singleOfScheduler(scheduler: Scheduler): Single<T> {
+        return this.single.observeOn(scheduler)
+    }
+
+    private fun <R> singleOfAsync(function: Function<T, Promise<R>>
+            , executeOn: Scheduler? = null, resumeOn: Scheduler? = null) : Single<R> {
+
+        return this.single
+            .run { executeOn?.let(::observeOn) ?: this }
+            .flatMap { t -> function.apply(t).let { nextPromise ->
 
                 //pass the error consumer forward (nextPromise's catches will execute first)
                 nextPromise.onErrorConsumer?.let {
@@ -442,8 +489,8 @@ open class Promise<T>(single: Single<T>) {
                 }
 
                 nextPromise.single
-            }
-        }
+            }}
+            .run { resumeOn?.let(::observeOn) ?: this }
     }
 
     private fun singleOfErrorReturn(function: Function<Throwable, T>) : Single<T> {
@@ -570,6 +617,22 @@ open class Promise<T>(single: Single<T>) {
                     it.onSuccess(supplier())
                 }
             }
+        }
+
+        /** @param supplier may throw exceptions, which will lead to standard rejection */
+        fun <R> singleOfAsyncAwait(supplier: () -> R
+                , executeOn: Scheduler? = null, resumeOn: Scheduler? = null) : Single<R> {
+
+            return Single.just<Unit>(Unit)
+                .run { executeOn?.let(::observeOn) ?: this }
+                .flatMap { Single.create<R> {
+                    try {
+                        it.onSuccess(supplier.invoke())
+                    } catch (e: Exception) {
+                        it.onError(e)
+                    }
+                }}
+                .run { resumeOn?.let(::observeOn) ?: this }
         }
 
         //TODO protected once kotlin supports the use of non-JVM static members protected in the super class
@@ -716,6 +779,20 @@ open class Promise<T>(single: Single<T>) {
 
         fun of() : Promise<Unit> {
             return Promise(singleOfCondition({ Unit }, { true }))
+        }
+
+        /** @param supplier may throw exceptions, which will lead to standard rejection */
+        fun <R> ofAsync(supplier: () -> R
+                , executeOn: Scheduler? = null, resumeOn: Scheduler? = null) : Promise<R> {
+            return Promise(singleOfAsyncAwait(supplier, executeOn, resumeOn))
+        }
+
+        fun ofDelay(ms: Long): Promise<Unit> {
+            return of().delay(ms)
+        }
+
+        fun delay(ms: Long, consumer: () -> Unit): Disposable {
+            return ofDelay(ms).then { consumer() }.execute()
         }
 
         class ConditionException(message: String?) : Throwable(message)

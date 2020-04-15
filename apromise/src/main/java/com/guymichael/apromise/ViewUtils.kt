@@ -32,16 +32,16 @@ class ViewUtils { companion object {
         val activityRef = WeakReference(activity)
 
         return APromise.ofWeakRefOrCancel(activityRef)
-            .thenAwait { activity ->
+            .thenAwait { a ->
                 APromise.ofCallback<A, OnActivityDestroyedListener<A>>({ promiseCallback ->
-                    (object: OnActivityDestroyedListener<A>(activity) {
+                    (object: OnActivityDestroyedListener<A>(a) {
                         override fun onDestroyed(activity: A) {
                             //release callback now as cancel() takes time
                             activity.application?.unregisterActivityLifecycleCallbacks(this)
                             promiseCallback.onSuccess(activity)
                         }
 
-                    }).also { activity.application?.registerActivityLifecycleCallbacks(it) }
+                    }).also { a.application?.registerActivityLifecycleCallbacks(it) }
 
                     //unregister (on errors or cancel mainly)
                 }) {

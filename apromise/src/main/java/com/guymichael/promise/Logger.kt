@@ -1,4 +1,4 @@
-package com.guymichael.apromise.promise
+package com.guymichael.promise
 
 object Logger {
     var mLogger: LoggerIntf? = null
