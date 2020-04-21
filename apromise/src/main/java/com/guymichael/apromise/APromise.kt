@@ -870,6 +870,41 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
                 .run { resumeOn?.let { thenOn(it){} } ?: this }
         }
 
+        /**
+         * Uses a [View]'s [View.post] (or [View.postDelayed]) and converts it to a promise.
+         * This is somewhat same as using [APromise.executeWhileAlive] and [APromise.ofDelay]
+         * but uses Android/View infrastructure instead:
+         * Easily resolve the promise **at end of execution queue** (delay = 0), while breaking
+         * if the view is destroyed.
+         *
+         * NOTICE: does not yet support cancelling the promise if the view gets destroyed before
+         *  the action has been executed. Also meaning that [finally] will not work when cancelled
+         */
+        @JvmStatic
+        fun <V : View> post(view: V, delayMs: Long = 0L): APromise<V> {
+            val viewRef = WeakReference(view)
+            val viewName = view.javaClass.simpleName
+
+            return ofCallback { promiseCallback ->
+                val postRunnable = {
+                    viewRef.get()
+                        ?.let(promiseCallback::onSuccess)
+                        ?: promiseCallback.onCancel("${viewName}'s Activity already destroyed")
+                }
+
+                viewRef.get()?.let { v ->
+                    if (delayMs > 0L) {
+                        v.postDelayed(postRunnable, delayMs)
+                    } else {
+                        v.post(postRunnable)
+                    }
+                }
+
+                //if viewRef is empty
+                ?: promiseCallback.onCancel("${viewName}'s Activity View already destroyed")
+            }
+        }
+
         @JvmStatic
         fun setGlobalAutoErrorHandler(handler: (Activity, Throwable) -> Unit) {
             globalErrorHandler = handler
