@@ -388,7 +388,9 @@ open class Promise<T>(single: Single<T>) {
      * For immediate execution-chain cancellation, use [cancelIf]
      * will also run 'finally' */
     fun cancel() {
-        cancelExecutor()
+        if( !isResolved) {
+            cancelExecutor()
+        }
     }
 
 
