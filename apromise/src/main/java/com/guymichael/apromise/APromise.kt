@@ -73,8 +73,13 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     /**
-     * @param context if not null, any HTTP/API errors will be auto-shown to user (as a Toast)
-     * @param autoCancel if true, executes with auto cancel - [executeWhileAlive]
+     * Executes the promise on a `context`, giving you control over:
+     * * Canceling automatically when the `Activity` is destroyed
+     * * Handling (e.g. [Toast]) errors automatically. See [setGlobalAutoErrorHandler]
+     *
+     * @param context
+     * @param autoCancel see [executeWhileAlive]. Default is `false`, as you might fetch
+     * some data (which can be cached) and you don't want to lose it
      */
     @JvmOverloads
     fun executeAutoHandleErrorMessage(context: Activity, autoCancel: Boolean = false): Disposable {
@@ -89,13 +94,27 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     /**
-     * @param view if context not null, any HTTP/API errors will be auto-shown to user (as a Toast)
-     * @param autoCancel if true, executes with auto cancel - [executeWhileAlive]
+     * Executes the promise on a `view`, giving you control over:
+     * * Canceling automatically when `view`'s `Context` (`Activity`) is destroyed
+     * * Handling (e.g. [Toast]) errors automatically. See [setGlobalAutoErrorHandler]
+     *
+     * Note: if both `autoCancel` and `handleErrorMessage` are `false`, there is no use
+     * of this method. Use [execute] instead
+     *
+     * @param view
+     * @param autoCancel see [executeWhileAlive]. Default is `false`, as you might fetch
+     * some data (which can be cached) and you don't want to lose it
      */
     @JvmOverloads
-    fun executeAutoHandleErrorMessage(view: View, autoCancel: Boolean = false): Disposable {
+    fun execute(view: View, autoCancel: Boolean = false, handleErrorMessage: Boolean = true)
+        : Disposable {
+
         return AndroidUtils.getActivity(view)?.let {
-            executeAutoHandleErrorMessage(it, autoCancel)
+            when {
+                handleErrorMessage ->   executeAutoHandleErrorMessage(it, autoCancel)
+                autoCancel ->           executeWhileAlive(it)
+                else ->                 execute()
+            }
         } ?: DisposedDisposable
     }
 
