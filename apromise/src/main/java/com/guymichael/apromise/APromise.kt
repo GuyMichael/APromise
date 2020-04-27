@@ -44,8 +44,6 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
      * This will also call 'finally'.
      * Note that it won't necessarily stop the promise execution chain immediately (as per [cancel])*/
     private fun autoCancel(context: Activity): APromise<T> {
-        this.contextRef = WeakReference(context)//THINK local ref to let auto cancel on multiple contexts
-
         val activityDestroyPromise = ViewUtils.waitForDestroy(context).then {
             //TODO break the execution chain immediately. see cancel() docs and singleOfCancelPredicate()
             this@APromise.cancel()
@@ -96,7 +94,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     /**
      * Executes the promise on a `view`, giving you control over:
      * * Canceling automatically when `view`'s `Context` (`Activity`) is destroyed
-     * * Handling (e.g. [Toast]) errors automatically. See [setGlobalAutoErrorHandler]
+     * * Handling (e.g. [Toast]) errors automatically.
      *
      * Note: if both `autoCancel` and `handleErrorMessage` are `false`, there is no use
      * of this method. Use [execute] instead
@@ -104,6 +102,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
      * @param view
      * @param autoCancel see [executeWhileAlive]. Default is `false`, as you might fetch
      * some data (which can be cached) and you don't want to lose it
+     * @param handleErrorMessage see [setGlobalAutoErrorHandler]. Default is `true`
      */
     @JvmOverloads
     fun execute(view: View, autoCancel: Boolean = false, handleErrorMessage: Boolean = true)
@@ -133,7 +132,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     fun doOnExecutionOrReject(consumer: Consumer<Activity>, context: Activity): APromise<T> {
-        this.contextRef = WeakReference(context) //THINK local context
+        val contextRef = WeakReference(context)
 
         return doOnExecution {
             getContext(contextRef)?.let { consumer.accept(it) }
@@ -156,7 +155,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     fun <A : Activity> thenWithContextOrReject(context: A, consumer: Consumer<Pair<A, T>>) : APromise<T> {
-        this.contextRef = WeakReference(context) //THINK local context
+        val contextRef = WeakReference(context)
 
         return then { getContext(contextRef)?.let { it as? A }?.let { activity ->
                 consumer.accept(Pair(activity, it))
@@ -171,7 +170,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
 
     /** skips this consumer (only) if the context became null */
     fun <A : Activity> thenWithContext(context: A, consumer: Consumer<Pair<A, T>>) : APromise<T> {
-        this.contextRef = WeakReference(context) //THINK local context
+        val contextRef = WeakReference(context)
 
         return then {
             getContext(contextRef)?.let { it as? A }?.let { activity ->
@@ -218,7 +217,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
 
     /** cancels the entire promise if the context became null */
     fun <A : Activity, R> thenAwaitWithContextOrCancel(context: A, function: (Pair<A, T>) -> Promise<R>) : APromise<R> {
-        this.contextRef = WeakReference(context) //THINK local context
+        val contextRef = WeakReference(context)
 
         return thenAwait {
             getContext(contextRef)?.let { it as? A }?.let { activity ->
@@ -314,7 +313,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     fun <A : Activity, R> thenAwaitWithContextOrReject(context: A, function: Function<Pair<A, T>, Promise<R>>) : APromise<R> {
-        this.contextRef = WeakReference(context) //THINK local context
+        val contextRef = WeakReference(context)
 
         return thenAwait { getContext(contextRef)?.let { it as? A }?.let { activity ->
                 function.apply(Pair(activity, it))
@@ -361,7 +360,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
 
     /** skips this consumer (only) if the context became null */
     fun <A : Activity> catchWithContext(context: A, consumer: Consumer<Pair<A, Throwable>>): APromise<T> {
-        this.contextRef = WeakReference(context) //THINK local context. Note: mutable (returns 'this') so context may be overridden
+        val contextRef = WeakReference(context)
 
         return catch { error -> getContext(contextRef)?.let { it as? A }?.let {
             consumer.accept(Pair(it, error))
@@ -387,7 +386,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
 
     /** skips this consumer (only) if the context became null */
     fun <A : Activity> catchIgnoreWithContext(context: A, consumer: Consumer<Pair<A, Throwable>>): APromise<Unit> {
-        this.contextRef = WeakReference(context) //THINK local context. Note: mutable (returns 'this') so context may be overridden
+        val contextRef = WeakReference(context)
 
         return catchIgnore { error -> getContext(contextRef)?.let { it as? A }?.let {
             consumer.accept(Pair(it, error))
@@ -932,15 +931,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
 }
 
 private fun <A : Activity> getContext(ref: WeakReference<A>) : A? {
-    val context = ref.get()
-
-    context?.let {
-        if (it.isDestroyed || it.isFinishing) {
-            return null
-        }
-    }
-
-    return context
+    return ref.get()?.takeIf { !it.isDestroyed && !it.isFinishing }
 }
 
 private fun androidSchedulerOrMain(looperOrNull: Looper? = Looper.myLooper()): Scheduler {
