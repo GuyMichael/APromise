@@ -168,6 +168,17 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         return thenWithContextOrReject(context, Consumer(consumer))
     }
 
+    fun <A : Activity> thenWithContextOrCancel(context: A) : APromise<Pair<T, A>> {
+        val contextRef = WeakReference(context)
+
+        return thenMap {
+            getContext(contextRef)?.let { it as? A }?.let { activity ->
+                Pair(it, activity)
+
+            } ?: cancelImmediately("APromise - null context")
+        }
+    }
+
     /** skips this consumer (only) if the context became null */
     fun <A : Activity> thenWithContext(context: A, consumer: Consumer<Pair<A, T>>) : APromise<T> {
         val contextRef = WeakReference(context)
@@ -277,6 +288,12 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     fun <V : View, R> thenMapWithViewOrCancel(view: V, function: (Pair<T, V>) -> R
             , requireAttachedToWindow: Boolean = true) : APromise<R> {
         return thenWithViewOrCancel(view, requireAttachedToWindow).thenMap(function)
+    }
+
+    /** cancels the entire promise if the view became null or detached */
+    fun <A : Activity, R> thenMapWithContextOrCancel(context: A, function: (Pair<T, A>) -> R)
+    : APromise<R> {
+        return thenWithContextOrCancel(context).thenMap(function)
     }
 
     /** cancels the entire promise if the view became null or detached, or 'function' returned null */
