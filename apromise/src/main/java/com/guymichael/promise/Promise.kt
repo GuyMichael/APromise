@@ -806,6 +806,6 @@ open class Promise<T>(single: Single<T>) {
             fun onCancel(reason: String? = null) = onFailure(SilentRejectionException("Silent rejection due to Promise-of-callback cancellation. With reason: $reason"))
         }
         class SimpleCallbackException(val result: Any?): RuntimeException()
-        protected class SilentRejectionException(reason: String): RuntimeException(reason)
+        class SilentRejectionException(reason: String): RuntimeException(reason)
     }
 }
