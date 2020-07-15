@@ -131,13 +131,30 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         } ?: DisposedDisposable
     }
 
-    fun doOnExecutionOrReject(consumer: Consumer<Activity>, context: Activity): APromise<T> {
+    fun doOnExecutionOrReject(context: Activity, consumer: Consumer<Activity>): APromise<T> {
         val contextRef = WeakReference(context)
 
         return doOnExecution {
             getContext(contextRef)?.let { consumer.accept(it) }
                 ?: reject(Throwable("APromise - null context"))
         }
+    }
+
+    fun doOnExecutionOrReject(context: Activity, consumer: (Activity) -> Unit): APromise<T> {
+        return doOnExecutionOrReject(context, Consumer(consumer))
+    }
+
+    fun doOnExecutionOrCancel(context: Activity, consumer: Consumer<Activity>): APromise<T> {
+        val contextRef = WeakReference(context)
+
+        return doOnExecution {
+            getContext(contextRef)?.let { consumer.accept(it) }
+                ?: cancelImmediately("APromise - null context")
+        }
+    }
+
+    fun doOnExecutionOrCancel(context: Activity, consumer: (Activity) -> Unit): APromise<T> {
+        return doOnExecutionOrCancel(context, Consumer(consumer))
     }
 
     /** skips this consumer (only) if the context became null */
