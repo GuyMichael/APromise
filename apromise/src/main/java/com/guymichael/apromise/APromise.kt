@@ -131,7 +131,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         } ?: DisposedDisposable
     }
 
-    fun doOnExecutionOrReject(context: Activity, consumer: Consumer<Activity>): APromise<T> {
+    fun <A : Activity> doOnExecutionOrReject(context: A, consumer: Consumer<A>): APromise<T> {
         val contextRef = WeakReference(context)
 
         return doOnExecution {
@@ -140,11 +140,11 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         }
     }
 
-    fun doOnExecutionOrReject(context: Activity, consumer: (Activity) -> Unit): APromise<T> {
+    fun <A : Activity> doOnExecutionOrReject(context: A, consumer: (A) -> Unit): APromise<T> {
         return doOnExecutionOrReject(context, Consumer(consumer))
     }
 
-    fun doOnExecutionOrCancel(context: Activity, consumer: Consumer<Activity>): APromise<T> {
+    fun <A : Activity> doOnExecutionOrCancel(context: A, consumer: Consumer<A>): APromise<T> {
         val contextRef = WeakReference(context)
 
         return doOnExecution {
@@ -153,7 +153,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         }
     }
 
-    fun doOnExecutionOrCancel(context: Activity, consumer: (Activity) -> Unit): APromise<T> {
+    fun <A : Activity> doOnExecutionOrCancel(context: A, consumer: (A) -> Unit): APromise<T> {
         return doOnExecutionOrCancel(context, Consumer(consumer))
     }
 
