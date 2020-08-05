@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.Toast
+import com.guymichael.promise.Logger
 import com.guymichael.promise.Promise
 import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
 import io.reactivex.rxjava3.core.Scheduler
@@ -131,319 +132,248 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         } ?: DisposedDisposable
     }
 
-    fun <A : Activity> doOnExecutionOrReject(context: A, consumer: Consumer<A>): APromise<T> {
-        val contextRef = WeakReference(context)
-
-        return doOnExecution {
-            getContext(contextRef)?.let { consumer.accept(it) }
-                ?: reject(Throwable("APromise - null context"))
-        }
-    }
-
-    fun <A : Activity> doOnExecutionOrReject(context: A, consumer: (A) -> Unit): APromise<T> {
-        return doOnExecutionOrReject(context, Consumer(consumer))
-    }
-
-    fun <A : Activity> doOnExecutionOrCancel(context: A, consumer: Consumer<A>): APromise<T> {
-        val contextRef = WeakReference(context)
-
-        return doOnExecution {
-            getContext(contextRef)?.let { consumer.accept(it) }
-                ?: cancelImmediately("APromise - null context")
-        }
-    }
-
-    fun <A : Activity> doOnExecutionOrCancel(context: A, consumer: (A) -> Unit): APromise<T> {
-        return doOnExecutionOrCancel(context, Consumer(consumer))
-    }
-
     /** skips this consumer (only) if the context became null */
-    fun <A : Activity> doOnExecutionWithContext(context: A, consumer: Consumer<A>): APromise<T> {
+    fun <A : Activity> doOnExecutionWithContext(context: A, consumer: (A) -> Unit): APromise<T> {
         val ref = WeakReference(context)
 
         return doOnExecution {
-            getContext(ref)?.let { consumer.accept(it) } //or skip
+            getContext(ref)?.let {
+                consumer.invoke(it)
+            }
+            //or skip
+            ?: Logger.d(this@APromise.javaClass, "doOnExecutionWithContext - skipping consumer - null context")
         }
     }
 
-    /** skips this consumer (only) if the context became null */
-    fun <A : Activity> doOnExecutionWithContext(context: A, consumer: (A) -> Unit): APromise<T> {
-        return doOnExecutionWithContext(context, Consumer(consumer))
-    }
-
-    fun <A : Activity> thenWithContextOrReject(context: A, consumer: Consumer<Pair<A, T>>) : APromise<T> {
+    /** skips (only) this consumer if the context became null */
+    fun <A : Activity> thenWithContext(context: A, consumer: (A, T) -> Unit) : APromise<T> {
         val contextRef = WeakReference(context)
 
-        return then { getContext(contextRef)?.let { it as? A }?.let { activity ->
-                consumer.accept(Pair(activity, it))
-
-            } ?: reject(Throwable("APromise - null context"))
+        return then {
+            getContext(contextRef)?.let { it as? A }?.let { activity ->
+                consumer.invoke(activity, it)
+            }
+            //or skip
+            ?: Logger.d(this@APromise.javaClass, "thenWithContext - skipping consumer - null context")
         }
     }
 
-    fun <A : Activity> thenWithContextOrReject(context: A, consumer: (Pair<A, T>) -> Unit) : APromise<T> {
-        return thenWithContextOrReject(context, Consumer(consumer))
-    }
-
-    fun <A : Activity> thenWithContextOrCancel(context: A) : APromise<Pair<T, A>> {
+    /** rejects the entire promise if the context became null */
+    fun <A : Activity, R> thenMapWithContextOrReject(context: A, function: (A, T) -> R) : APromise<R> {
         val contextRef = WeakReference(context)
 
         return thenMap {
             getContext(contextRef)?.let { it as? A }?.let { activity ->
-                Pair(it, activity)
-
-            } ?: cancelImmediately("APromise - null context")
+                function.invoke(activity, it)
+            } ?: reject(Throwable("thenMapWithContextOrReject - null context"))
         }
     }
 
-    /** skips this consumer (only) if the context became null */
-    fun <A : Activity> thenWithContext(context: A, consumer: Consumer<Pair<A, T>>) : APromise<T> {
+    /** cancels the entire promise if the context became null */
+    fun <A : Activity, R> thenMapWithContextOrCancel(context: A, function: (A, T) -> R) : APromise<R> {
         val contextRef = WeakReference(context)
 
-        return then {
+        return thenMap {
             getContext(contextRef)?.let { it as? A }?.let { activity ->
-                consumer.accept(Pair(activity, it))
-            } //or skip
+                function.invoke(activity, it)
+            } ?: cancelImmediately("thenMapWithContextOrCancel - null context")
         }
     }
 
-    /** skips this consumer (only) if the context became null */
-    fun <A : Activity> thenWithContext(context: A, consumer: (Pair<A, T>) -> Unit) : APromise<T> {
-        return thenWithContext(context, Consumer(consumer))
+    /** rejects the entire promise if the context became null */
+    fun <A : Activity, R> thenAwaitWithContextOrReject(context: A, function: (A, T) -> Promise<R>) : APromise<R> {
+        val contextRef = WeakReference(context)
+
+        return thenAwait {
+            getContext(contextRef)?.let { it as? A }?.let { activity ->
+                function.invoke(activity, it)
+
+            } ?: reject(Throwable("thenAwaitWithContextOrReject - null context"))
+        }
     }
 
-    /** skips this consumer (only) if the view or its context became null, or view isn't attached to window */
-    fun <V : View> thenWithView(view: V, consumer: Consumer<Pair<V, T>>
-            , requireAttachedToWindow: Boolean = true) : APromise<T> {
+    /** cancels the entire promise if the context became null */
+    fun <A : Activity, R> thenAwaitWithContextOrCancel(context: A, function: (A, T) -> Promise<R>) : APromise<R> {
+        val contextRef = WeakReference(context)
+
+        return thenAwait {
+            getContext(contextRef)?.let { it as? A }?.let { activity ->
+                function.invoke(activity, it)
+
+            } ?: cancelImmediately("APromise - thenAwaitWithContextOrCancel - null context")
+        }
+    }
+
+    /** skips (only) this consumer if the view or its context became null, or view isn't attached to window */
+    fun <V : View> thenWithView(view: V, consumer: (V, T) -> Unit, requireAttachedToWindow: Boolean = true)
+    : APromise<T> {
 
         val viewRef = WeakReference(view)
 
         return then {
             viewRef.getIfAlive(requireAttachedToWindow)?.let { v ->
-                consumer.accept(Pair(v, it))
-            } //or skip
+                consumer.invoke(v, it)
+            }
+            //or skip
+            ?: Logger.d(this@APromise.javaClass, "thenWithView - skipping consumer - null view")
         }
     }
 
-    /** skips this consumer (only) if the context became null */
-    fun <V : View> thenWithView(view: V, consumer: (Pair<V, T>) -> Unit
-            , requireAttachedToWindow: Boolean = true) : APromise<T> {
-        return thenWithView(view, Consumer(consumer), requireAttachedToWindow)
-    }
+    /** rejects the entire promise if the context became null */
+    fun <V : View, R> thenMapWithViewOrReject(view: V, function: (V, T) -> R, requireAttachedToWindow: Boolean = true)
+    : APromise<R> {
 
-    /** skips this consumer (only) if the view or its context became null, or view isn't attached to window */
-    fun <V : View> then(view: V, consumer: Consumer<T>, requireAttachedToWindow: Boolean = true) : APromise<T> {
-        return thenWithView(view, { (_, t) ->
-            consumer.accept(t)
-        }, requireAttachedToWindow)
-    }
+        val viewRef = WeakReference(view)
 
-    /** skips this consumer (only) if the view or its context became null, or view isn't attached to window */
-    fun <V : View> then(view: V, consumer: (T) -> Unit, requireAttachedToWindow: Boolean = true) : APromise<T> {
-        return then(view, Consumer(consumer), requireAttachedToWindow)
+        return thenMap {
+            viewRef.getIfAlive(requireAttachedToWindow)?.let { v ->
+                function.invoke(v, it)
+            } ?: reject(Throwable("thenMapWithViewOrReject - null view"))
+        }
     }
 
     /** cancels the entire promise if the context became null */
-    fun <A : Activity, R> thenAwaitWithContextOrCancel(context: A, function: (Pair<A, T>) -> Promise<R>) : APromise<R> {
-        val contextRef = WeakReference(context)
+    fun <V : View, R> thenMapWithViewOrCancel(view: V, function: (V, T) -> R, requireAttachedToWindow: Boolean = true)
+    : APromise<R> {
+
+        val viewRef = WeakReference(view)
+
+        return thenMap {
+            viewRef.getIfAlive(requireAttachedToWindow)?.let { v ->
+                function.invoke(v, it)
+            } ?: cancelImmediately("thenMapWithViewOrCancel - null view")
+        }
+    }
+
+    /** rejects the entire promise if the view became null */
+    fun <V : View, R> thenAwaitWithViewOrReject(view: V, function: (V, T) -> Promise<R>
+            , requireAttachedToWindow: Boolean = true
+    ) : APromise<R> {
+
+        val viewRef = WeakReference(view)
 
         return thenAwait {
-            getContext(contextRef)?.let { it as? A }?.let { activity ->
-                function.invoke(Pair(activity, it))
+            viewRef.getIfAlive(requireAttachedToWindow)?.let { v ->
+                function.invoke(v, it)
 
-            } ?: cancelImmediately("APromise - null context")
+            } ?: reject(Throwable("thenAwaitWithViewOrReject - null view"))
         }
-    }
-
-    /** cancels the entire promise if the context became null */
-    fun <R> thenAwaitOrCancel(context: Activity, function: Function<T, Promise<R>>): APromise<R> {
-        return thenAwaitWithContextOrCancel(context) { (_, t) ->
-            function.apply(t)
-        }
-    }
-
-    /** cancels the entire promise if the context became null */
-    fun <R> thenAwaitOrCancel(context: Activity, function: (T) -> Promise<R>): APromise<R> {
-        return thenAwaitOrCancel(context, Function(function))
     }
 
     /** cancels the entire promise if the view became null */
-    fun <V : View, R> thenAwaitWithViewOrCancel(view: V, function: (Pair<V, T>) -> Promise<R>
-            , requireAttachedToWindow: Boolean = true) : APromise<R> {
+    fun <V : View, R> thenAwaitWithViewOrCancel(view: V, function: (V, T) -> Promise<R>
+            , requireAttachedToWindow: Boolean = true
+    ) : APromise<R> {
+
         val viewRef = WeakReference(view)
 
         return thenAwait {
             viewRef.getIfAlive(requireAttachedToWindow)?.let { v ->
-                function.invoke(Pair(v, it))
+                function.invoke(v, it)
 
-            } ?: cancelImmediately("APromise - null view or view context, or view is not attached to window")
+            } ?: cancelImmediately("thenAwaitWithViewOrCancel - null view")
         }
     }
 
-    /** cancels the entire promise if the view became null or detached */
-    fun <V : View> thenWithViewOrCancel(viewRef: WeakReference<V>, requireAttachedToWindow: Boolean = true) : APromise<Pair<T, V>> {
-        return thenMap { t ->
-            viewRef.getIfAlive(requireAttachedToWindow)?.let { v ->
-                Pair(t, v)
-
-            } ?: cancelImmediately("APromise - null view or view context, or view is not attached to window")
-        }
-    }
-
-    /** cancels the entire promise if the view became null or detached */
-    fun <V : View> thenWithViewOrCancel(view: V, requireAttachedToWindow: Boolean = true) : APromise<Pair<T, V>> {
-        return thenWithViewOrCancel(WeakReference(view), requireAttachedToWindow)
-    }
-
-    /** cancels the entire promise if the view became null or detached */
-    fun <V : View, R> thenMapWithViewOrCancel(view: V, function: Function<Pair<T, V>, R>
-            , requireAttachedToWindow: Boolean = true) : APromise<R> {
-        return thenWithViewOrCancel(view, requireAttachedToWindow).thenMap(function)
-    }
-
-    /** cancels the entire promise if the view became null or detached */
-    fun <V : View, R> thenMapWithViewOrCancel(view: V, function: (Pair<T, V>) -> R
-            , requireAttachedToWindow: Boolean = true) : APromise<R> {
-        return thenWithViewOrCancel(view, requireAttachedToWindow).thenMap(function)
-    }
-
-    /** cancels the entire promise if the view became null or detached */
-    fun <A : Activity, R> thenMapWithContextOrCancel(context: A, function: (Pair<T, A>) -> R)
-    : APromise<R> {
-        return thenWithContextOrCancel(context).thenMap(function)
-    }
-
-    /** cancels the entire promise if the view became null or detached, or 'function' returned null */
-    fun <V : View, R> thenMapOrCancelWithViewOrCancel(view: V, function: (Pair<T, V>) -> R?
-            , requireAttachedToWindow: Boolean = true) : APromise<R> {
-        return thenWithViewOrCancel(view, requireAttachedToWindow).thenMapOrCancel(function)
-    }
-
-    /** cancels the entire promise if the view became null or detached */
-    fun <V : View> thenViewOrCancel(view: V, requireAttachedToWindow: Boolean = true) : APromise<V> {
-        return thenWithViewOrCancel(view, requireAttachedToWindow).thenMap { it.second }
-    }
-
-    fun <V : View> delayWithViewOrCancel(view: V, ms: Long, requireAttachedToWindow: Boolean = true) : APromise<Pair<T, V>> {
-        val viewRef = WeakReference(view)                                                   //weak ref until execution
-
-        return thenMapOrCancel({ t -> viewRef.takeIfAlive(requireAttachedToWindow)?.let {   //weak ref until delayed
-                Pair(t, it)
-            }})
-            .delay(ms)
-            .thenMapOrCancel({ (t, ref) -> ref.getIfAlive(requireAttachedToWindow)?.let {   //ref.get()
-                Pair(t, it)
-            }})
-    }
-
-    fun <V : View> delayOrCancel(view: V, ms: Long, requireAttachedToWindow: Boolean = true) : APromise<T> {
-        return delayWithViewOrCancel(view, ms, requireAttachedToWindow)
-            .thenMap { it.first }
-    }
-
-    /** cancels the entire promise if the reference became null */
-    fun <R> thenWithRefOrCancel(ref: WeakReference<R>) : APromise<R> {
-        return thenMapOrCancel({ ref.get() }, { "thenWithRefOrCancel(): 'ref' returned null" })
-    }
-
-    fun <A : Activity, R> thenAwaitWithContextOrReject(context: A, function: Function<Pair<A, T>, Promise<R>>) : APromise<R> {
-        val contextRef = WeakReference(context)
-
-        return thenAwait { getContext(contextRef)?.let { it as? A }?.let { activity ->
-                function.apply(Pair(activity, it))
-
-            } ?: reject(Throwable("Context became null"))
-        }
-    }
-
-    fun <A : Activity, R> thenAwaitWithContextOrReject(context: A, function: (Pair<A, T>) -> Promise<R>) : APromise<R> {
-        return thenAwaitWithContextOrReject(context, Function(function))
-    }
-
-    /** skips this consumer (only) if the context became null */
-    fun then(context: Activity, consumer: Consumer<T>) : APromise<T> {
-        return thenWithContext(context, Consumer { (_, t) ->
-            consumer.accept(t)
-        })
-    }
-
-    /** skips this consumer (only) if the context became null */
-    fun then(context: Activity, consumer: (T) -> Unit) : APromise<T> {
-        return then(context, Consumer(consumer))
-    }
-
-    fun thenOrReject(context: Activity, consumer: Consumer<T>) : APromise<T> {
-        return thenWithContextOrReject(context, Consumer { (_, t) ->
-            consumer.accept(t)
-        })
-    }
-
-    fun thenOrReject(context: Activity, consumer: (T) -> Unit) : APromise<T> {
-        return thenOrReject(context, Consumer(consumer))
-    }
-
-    fun <R> thenAwaitOrReject(context: Activity, function: Function<T, Promise<R>>) : APromise<R> {
-        return thenAwaitWithContextOrReject(context, Function { (_, t) ->
-            function.apply(t)
-        })
-    }
-
-    fun <R> thenAwaitOrReject(context: Activity, function: (T) -> Promise<R>) : APromise<R> {
-        return thenAwaitOrReject(context, Function(function))
-    }
-
-    /** skips this consumer (only) if the context became null */
+    /** skips (only) this consumer if the context became null */
     fun <A : Activity> catchWithContext(context: A, consumer: Consumer<Pair<A, Throwable>>): APromise<T> {
         val contextRef = WeakReference(context)
 
         return catch { error -> getContext(contextRef)?.let { it as? A }?.let {
-            consumer.accept(Pair(it, error))
-        }}
+                consumer.accept(Pair(it, error))
+
+            }
+            //or skip
+            ?: Logger.d(this@APromise.javaClass, "catchWithContext - skipping consumer - null context")
+        }
     }
 
     /** skips this consumer (only) if the context became null */
-    fun <A : Activity> catchWithContext(context: A, consumer: (Pair<A, Throwable>) -> Unit): APromise<T> {
-        return catchWithContext(context, Consumer(consumer))
-    }
-
-    /** skips this consumer (only) if the context became null */
-    fun catch(context: Activity, consumer: Consumer<in Throwable>): APromise<T> {
-        return catchWithContext(context, Consumer { (_, e) ->
-            consumer.accept(e)
-        })
-    }
-
-    /** skips this consumer (only) if the context became null */
-    fun catch(context: Activity, consumer: (Throwable) -> Unit): APromise<T> {
-        return catch(context, Consumer(consumer))
-    }
-
-    /** skips this consumer (only) if the context became null */
-    fun <A : Activity> catchIgnoreWithContext(context: A, consumer: Consumer<Pair<A, Throwable>>): APromise<Unit> {
+    fun <A : Activity> catchIgnoreWithContext(context: A, consumer: (A, Throwable) -> Unit): APromise<Unit> {
         val contextRef = WeakReference(context)
 
-        return catchIgnore { error -> getContext(contextRef)?.let { it as? A }?.let {
-            consumer.accept(Pair(it, error))
-        }}
+        return catchIgnore { e -> getContext(contextRef)?.let { it as? A }?.let {
+                consumer.invoke(it, e)
+            }
+            //or skip
+            ?: Logger.d(this@APromise.javaClass, "catchIgnoreWithContext - skipping consumer - null context")
+        }
+    }
+
+    /** skips (only) this consumer if the view became null */
+    fun <V : View> catchWithView(view: V, consumer: (V, Throwable) -> Unit
+             , requireAttachedToWindow: Boolean = true
+    ): APromise<T> {
+
+        val viewRef = WeakReference(view)
+
+        return catch { e ->
+            viewRef.getIfAlive(requireAttachedToWindow)?.let {
+                consumer.invoke(it, e)
+
+            }
+            //or skip
+            ?: Logger.d(this@APromise.javaClass, "catchWithContext - skipping consumer - null context")
+        }
+    }
+
+    /** skips (only) this consumer if the view became null */
+    fun <V : View> catchIgnoreWithView(view: V, consumer: (V, Throwable) -> Unit
+             , requireAttachedToWindow: Boolean = true
+    ): APromise<Unit> {
+
+        val viewRef = WeakReference(view)
+
+        return catchIgnore { e ->
+            viewRef.getIfAlive(requireAttachedToWindow)?.let {
+                consumer.invoke(it, e)
+
+            }
+            //or skip
+            ?: Logger.d(this@APromise.javaClass, "catchIgnoreWithView - skipping consumer - null view")
+        }
     }
 
     /** skips this consumer (only) if the context became null */
-    fun <A : Activity> catchIgnoreWithContext(context: A, consumer: (Pair<A, Throwable>) -> Unit): APromise<Unit> {
-        return catchIgnoreWithContext(context, Consumer(consumer))
+    fun <A : Activity> finallyWithContext(context: A, consumer: (A, Boolean) -> Unit) : APromise<T> {
+        val contextRef = WeakReference(context)
+
+        return super.finally {
+            getContext(contextRef)?.let { activity ->
+                consumer.invoke(activity, it)
+            }
+            //or skip
+            ?: Logger.d(this@APromise.javaClass, "finallyWithContext - skipping consumer - null context")
+
+        } as APromise<T>
     }
 
-    fun <A : Activity> catchIgnore(context: A, consumer: Consumer<Throwable>): APromise<Unit> {
-        return catchIgnoreWithContext(context, Consumer { (_, e) ->
-            consumer.accept(e)
-        })
+    /** skips this consumer (only) if the view became null */
+    fun <V : View> finallyWithView(view: V, consumer: (V, Boolean) -> Unit
+          , requireAttachedToWindow: Boolean = true
+    ) : APromise<T> {
+
+        val viewRef = WeakReference(view)
+
+        return super.finally {
+            viewRef.getIfAlive(requireAttachedToWindow)?.let { v ->
+                consumer.invoke(v, it)
+            }
+            //or skip
+            ?: Logger.d(this@APromise.javaClass, "finallyWithView - skipping consumer - null view")
+
+        } as APromise<T>
     }
 
-    fun <A : Activity> catchIgnore(context: A, consumer: (Throwable) -> Unit): APromise<Unit> {
-        return catchIgnore(context, Consumer(consumer))
-    }
 
 
-    /*overridden method just for the response type*/
+
+
+
+
+    /* Promise override START */
+    //overridden methods are just for casting the response type to APromise
+
     override fun <R> thenAwait(function: Function<T, Promise<R>>, executeOn: Scheduler?, resumeOn: Scheduler?): APromise<R> {
         return super.thenAwait(function, executeOn, resumeOn) as APromise<R>
     }
@@ -513,14 +443,6 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     override fun then(consumer: (T) -> Unit): APromise<T> {
         return super.then(Consumer(consumer)) as APromise<T>
     }
-
-   /* override fun thenRun(runnable: Runnable): APromise<T> {
-        return super.thenRun(runnable) as APromise<T>
-    }
-
-    override fun thenRun(runnable: () -> Unit): APromise<T> {
-        return super.thenRun(runnable) as APromise<T>
-    }*/
 
     override fun catch(consumer: Consumer<in Throwable>): APromise<T> {
         return super.catch(consumer) as APromise<T>
@@ -651,15 +573,6 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         return super.finally(consumer) as APromise<T>
     }
 
-    /** skips this consumer (only) if the context became null */
-    fun <A : Activity> finallyWithContext(context: A, consumer: (Pair<A, Boolean>) -> Unit) : APromise<T> {
-        val ref = WeakReference(context)
-
-        return super.finally { resolved ->
-            getContext(ref)?.let { consumer.invoke(it to resolved) } //or skip
-        } as APromise<T>
-    }
-
     override fun doOnExecution(runnable: Runnable): APromise<T> {
         return super.doOnExecution(runnable) as APromise<T>
     }
@@ -667,6 +580,18 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     override fun doOnExecution(runnable: () -> Unit): APromise<T> {
         return super.doOnExecution(Runnable(runnable)) as APromise<T>
     }
+
+    /* Promise override END */
+
+
+
+
+
+
+
+
+
+
 
 
     companion object {
