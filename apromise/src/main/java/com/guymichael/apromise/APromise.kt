@@ -776,7 +776,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
                 .thenMapOrCancel({ it.getIfAlive(requireAttachedToWindow) })    //ref.get()
         }
 
-        fun <V : View> ofView(view: V, requireAttachedToWindow: Boolean = true) : APromise<V> {
+        fun <V : View> ofViewOrCancel(view: V, requireAttachedToWindow: Boolean = true) : APromise<V> {
             return of(WeakReference(view))
                 .thenMapOrCancel({ it.getIfAlive(requireAttachedToWindow) })
         }
