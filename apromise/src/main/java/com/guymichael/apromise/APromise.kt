@@ -24,16 +24,30 @@ import java.lang.ref.WeakReference
  * Also, it lets you automatically Toast error messages for you. Or, if you override this class, just any type of UI error handling
  */
 open class APromise<T>(single: Single<T>) : Promise<T>(single) {
-    private var contextRef = WeakReference<Activity>(null)
-    private var failSilently = true
+    private var handleError_contextRef = WeakReference<Activity>(null)
+    private var handleError_failSilently = true
 
     override fun <S> createInstanceImpl(single: Single<S>): APromise<S> {
         return APromise(single)
     }
 
+    override fun <S> passOnExtraMembers(nextPromise: Promise<S>): Promise<S> {
+        try {
+            (nextPromise as? APromise<T>)?.also { np ->
+                np.handleError_contextRef = this@APromise.handleError_contextRef
+                np.handleError_failSilently = this@APromise.handleError_failSilently
+            }
+        } catch (e: Throwable) {
+            Logger.e(javaClass, "error casting nextPromise (${nextPromise.javaClass.simpleName}) to APromise: ${e.message}")
+            e.printStackTrace()
+        }
+
+        return nextPromise
+    }
+
     final override fun onPromiseError(e: Throwable) {
-        if( !this.failSilently) {
-            getContext(this.contextRef)?.let { onPromiseErrorAutoHandle(it, e) }
+        if( !this.handleError_failSilently) {
+            getContext(this.handleError_contextRef)?.let { onPromiseErrorAutoHandle(it, e) }
         }
     }
 
@@ -41,11 +55,21 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         globalErrorHandler(context, e)
     }
 
-    /** cancels (disposes) this promise when activity is destroyed.
+
+
+
+
+
+
+
+    /* Android-related helper methods (context and view) */
+
+    /** cancels (disposes) this promise when `activity` is destroyed.
      * This will also call 'finally'.
      * Note that it won't necessarily stop the promise execution chain immediately (as per [cancel])*/
-    private fun autoCancel(context: Activity): APromise<T> {
-        val activityDestroyPromise = ViewUtils.waitForDestroy(context).then {
+    fun autoCancel(activity: Activity): APromise<T> {
+        val activityDestroyPromise = ViewUtils.waitForDestroy(activity).then {
+            Logger.d(this@APromise.javaClass, "autoCancel - cancelling - activity ${it.javaClass.simpleName} destroyed")
             //TODO break the execution chain immediately. see cancel() docs and singleOfCancelPredicate()
             this@APromise.cancel()
         }
@@ -57,9 +81,10 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         }
     }
 
-    private fun autoCancel(view: View): APromise<T> {//TODO QA
+    fun autoCancel(view: View): APromise<T> {//TODO QA
 
         val viewDetachPromise = ViewUtils.waitForDetach(view).then {
+            Logger.d(this@APromise.javaClass, "autoCancel - cancelling - view ${it.javaClass.simpleName} detached")
             //TODO break the execution chain immediately. see cancel() docs and singleOfCancelPredicate()
             this@APromise.cancel()
         }
@@ -71,65 +96,11 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         }
     }
 
-    /**
-     * Executes the promise on a `context`, giving you control over:
-     * * Canceling automatically when the `Activity` is destroyed
-     * * Handling (e.g. [Toast]) errors automatically. See [setGlobalAutoErrorHandler]
-     *
-     * @param context
-     * @param autoCancel see [executeWhileAlive]. Default is `false`, as you might fetch
-     * some data (which can be cached) and you don't want to lose it
-     */
-    @JvmOverloads
-    fun executeAutoHandleErrorMessage(context: Activity, autoCancel: Boolean = false): Disposable {
-        this.contextRef = WeakReference(context)
-        this.failSilently = false
+    fun autoHandleErrorMessage(context: Activity): APromise<T> {
+        this.handleError_contextRef = WeakReference(context)
+        this.handleError_failSilently = false
 
-        return if (autoCancel) {
-            executeWhileAlive(context)
-        } else {
-            execute()
-        }
-    }
-
-    /**
-     * Executes the promise on a `view`, giving you control over:
-     * * Canceling automatically when `view`'s `Context` (`Activity`) is destroyed
-     * * Handling (e.g. [Toast]) errors automatically.
-     *
-     * Note: if both `autoCancel` and `handleErrorMessage` are `false`, there is no use
-     * of this method. Use [execute] instead
-     *
-     * @param view
-     * @param autoCancel see [executeWhileAlive]. Default is `false`, as you might fetch
-     * some data (which can be cached) and you don't want to lose it
-     * @param handleErrorMessage see [setGlobalAutoErrorHandler]. Default is `true`
-     */
-    @JvmOverloads
-    fun execute(view: View, autoCancel: Boolean = false, handleErrorMessage: Boolean = true)
-        : Disposable {
-
-        return AndroidUtils.getActivity(view)?.let {
-            when {
-                handleErrorMessage ->   executeAutoHandleErrorMessage(it, autoCancel)
-                autoCancel ->           executeWhileAlive(it)
-                else ->                 execute()
-            }
-        } ?: DisposedDisposable
-    }
-
-    /** cancels when context is destroyed
-     * auto cancels sometime after activity is destroyed. See [cancel] */
-    fun executeWhileAlive(context: Activity): Disposable {
-        return autoCancel(context).execute()
-    }
-
-    /** cancelled when view is destroyed / detached from window.
-     * Note: does not execute if view's context is (already) null */
-    fun executeWhileAlive(view: View): Disposable {//TODO THINK fail the promise(!) ? cancel (hasn't been executed)
-        return AndroidUtils.getActivity(view)?.let { activity ->
-            autoCancel(view).executeWhileAlive(activity)
-        } ?: DisposedDisposable
+        return this
     }
 
     /** skips this consumer (only) if the context became null */
@@ -780,13 +751,13 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
         @JvmStatic
         fun delayWhileAlive(view: View, ms: Long, consumer: () -> Unit): Disposable {
             //note that this one is different than the parent Promise's, as APromise.delay() adds logic
-            return ofDelay(ms).then { consumer() }.executeWhileAlive(view)
+            return ofDelay(ms).then { consumer() }.autoCancel(view).execute()
         }
 
         @JvmStatic
         fun delayWhileAlive(activity: Activity, ms: Long, consumer: () -> Unit): Disposable {
             //note that this one is different than the parent Promise's, as APromise.delay() adds logic
-            return ofDelay(ms).then { consumer() }.executeWhileAlive(activity)
+            return ofDelay(ms).then { consumer() }.autoCancel(activity).execute()
         }
 
         /** keeps a [WeakReference] of 'r' while delaying and cancels if garbage-collected */

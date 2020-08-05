@@ -17,18 +17,46 @@ open class Promise<T>(single: Single<T>) {
     private var onErrorConsumer: Consumer<in Throwable>? = null
     private var asyncErrorConsumer: Consumer<in Throwable>? = null
     private var promiseSubscriber: Disposable? = null//held (always and only) by the last promise in the chain
-    private var isResolved: Boolean = false
-    protected var cancelExecutor: () -> Unit = {
-        promiseSubscriber?.apply {
-            if( !isDisposed) {
-                dispose() //THINK local boolean 'isCancelled' to avoid further 'then' executions
+    protected var disposeExecutor: () -> Unit = {
+        promiseSubscriber?.also { ps ->
+            if( !ps.isDisposed) {
+                ps.dispose()
                 Logger.w(this@Promise.javaClass, "Promise Cancelled. isResolved:$isResolved")
             }
         }
     }
 
+    /** Completed with success */
+    var isResolved: Boolean = false
+        private set
+    /** Completed with either success, failure or cancellation */
+    var isCompleted: Boolean = false
+        private set
+    var isCancelled: Boolean = false //THINK use 'isCancelled' to avoid further 'then' executions
+        private set
+    val isCompletedWithError: Boolean
+        get() = isCompleted && !isResolved && !isCancelled
+
+
     init {
-        this.single = single.doOnSuccess { isResolved = true }
+        this.single = single
+            //we do this here (and not in execute() / other places) so that:
+            // 1. if this particular promise is not the one to get executed, it will still update its status
+            // 2. so other subscribers to any of these 3 will have the promise's status already updated when called
+            .doOnSuccess {
+                isCompleted = true
+                isResolved = true
+            }
+            .doOnError {
+                isCompleted = true
+                isResolved = false
+            }
+            .doOnDispose { //TODO QA
+                if( !isCompleted) {
+                    isCompleted = true
+                    isCancelled = true //also set in cancel()
+                }
+            }
     }
 
     fun isExecuted() : Boolean {
@@ -46,8 +74,15 @@ open class Promise<T>(single: Single<T>) {
             //when someone call cancel() on 'us', we want the next promise to be cancelled.
             //eventually, we need the very last promise to be the actual executor, as it
             //holds the Disposable and only it can actually cancel the whole Promise chain
-            this.cancelExecutor = it::cancel
+            this.disposeExecutor = it::cancel
         }
+    }
+
+    /** When creating [new instances][createInstance] of this promise, pass on any consumers to the next
+     * promise. Note: no need to pass [disposeExecutor] and [onErrorConsumer], it is already done for you.
+     * Also no need to call super (empty impl.) */
+    protected open fun <S> passOnExtraMembers(nextPromise: Promise<S>): Promise<S> {
+        return nextPromise
     }
 
     private fun <S> createInstance(single: Single<S>, bindCancel: Boolean = true): Promise<S> {
@@ -58,37 +93,46 @@ open class Promise<T>(single: Single<T>) {
         return createInstanceImpl(single)
             .let(::passOnErrorConsumer)
             .letIf({ bindCancel }, ::bindCancelExecution)
+            .let(::passOnExtraMembers)
     }
 
     fun execute(): Disposable {
         checkIfExecutedAndThrow()
 
-        this.promiseSubscriber = this.single.subscribe({
-            isResolved = true//THINK needed as well as the onSuccess one (inside init)
-            Logger.dLazy(this@Promise.javaClass) { "Promise resolved: ${if (it is Any) it.javaClass.simpleName else ""} : $it" }
+        this.promiseSubscriber = this.single.subscribe(
+            //on success
+            {
+                Logger.dLazy(this@Promise.javaClass) {
+                    "Promise resolved: ${if (it is Any) it.javaClass.simpleName else ""} : $it"
+                }
+            },
 
-        }, { error ->
-            Logger.w(this@Promise.javaClass,
-                if (error is TimeoutException) "on timeout"
-                else "on error: ${error.javaClass}, ${error.message}"
-            )
+            //on error
+            { error ->
+                Logger.w(this@Promise.javaClass,
+                    if (error is TimeoutException) "on timeout"
+                    else "on error: ${error.javaClass}, ${error.message}"
+                )
 
-            if (error !is SilentRejectionException) {
-                onPromiseError(error)
+                if (error !is SilentRejectionException) {
+                    onPromiseError(error)
 
-                onErrorConsumer?.accept(error)
-                    //or fail silently
-                    ?: Logger.e(this@Promise.javaClass, "uncaught error: ${error.message}")
+                    onErrorConsumer?.accept(error)
+                        //or fail silently
+                        ?: Logger.e(this@Promise.javaClass, "uncaught error: ${error.message}").also {
+                            error.printStackTrace()
+                        }
+                }
+
+                promiseSubscriber?.takeIf { !it.isDisposed }?.dispose()//THINK should not dispose on errors, should probably remove this line
             }
-
-            promiseSubscriber?.takeIf { !it.isDisposed }?.dispose()//THINK should not dispose on errors, should probably remove this line
-        })
+        )
 
         return object : Disposable {
             //because we just executed the promise ('this') so it is the last one in chain.
             //note that (only) here we can assume that promiseSubscriber isn't null
             override fun isDisposed() = promiseSubscriber?.isDisposed != false //if null assume was reset
-            override fun dispose() = cancelExecutor()
+            override fun dispose() = disposeExecutor()
         }
     }
 
@@ -366,13 +410,15 @@ open class Promise<T>(single: Single<T>) {
         return createInstance(singleOfScheduler(scheduler)).then(consumer)
     }
 
-    /** calls 'consumer' when this Promise finishes, with boolean 'isResolved' - true if Promise succeeded, false if failed or cancelled */
-    open fun finally(consumer: (Boolean) -> Unit): Promise<T> {
+    /** calls 'consumer' when this Promise finishes or disposed, with boolean 'isResolved' - true if Promise succeeded, false if failed or cancelled/disposed */
+    open fun finally(consumer: (isResolved: Boolean) -> Unit): Promise<T> {
+        //THINK we pass caller promise's isResolved instead of the next promise's ('createInstance') isResolved.
+        // best approach would be to pass the whole next promise to the consumer. But how?
         return createInstance(this.single.doFinally{ consumer(isResolved) })
     }
 
     /** same as [finally] for Java usage (safe word) */
-    open fun doFinally(consumer: (Boolean) -> Unit): Promise<T> {
+    open fun doFinally(consumer: (isResolved: Boolean) -> Unit): Promise<T> {
         return finally(consumer)
     }
 
@@ -388,8 +434,11 @@ open class Promise<T>(single: Single<T>) {
      * For immediate execution-chain cancellation, use [cancelIf]
      * will also run 'finally' */
     fun cancel() {
-        if( !isResolved) {
-            cancelExecutor()
+        if( !isCompleted) {
+            isCancelled = true  //set here as well as init{} so that:
+                                // 1. cancelImmediately (etc.) will still have the state 'cancelled' and not 'rejected'
+                                // 2. update promise state before actual disposal
+            disposeExecutor()
         }
     }
 
