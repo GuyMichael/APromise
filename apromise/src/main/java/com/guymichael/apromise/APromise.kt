@@ -176,7 +176,7 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     /** skips (only) this consumer if the view or its context became null, or view isn't attached to window */
-    fun <V : View> thenWithView(view: V, consumer: (V, T) -> Unit, requireAttachedToWindow: Boolean = true)
+    fun <V : View> thenWithView(view: V, requireAttachedToWindow: Boolean = true, consumer: (V, T) -> Unit)
     : APromise<T> {
 
         val viewRef = WeakReference(view)
@@ -191,7 +191,8 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     /** rejects the entire promise if the context became null */
-    fun <V : View, R> thenMapWithViewOrReject(view: V, function: (V, T) -> R, requireAttachedToWindow: Boolean = true)
+    fun <V : View, R> thenMapWithViewOrReject(view: V, requireAttachedToWindow: Boolean = true
+        , function: (V, T) -> R)
     : APromise<R> {
 
         val viewRef = WeakReference(view)
@@ -204,7 +205,8 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     /** cancels the entire promise if the context became null */
-    fun <V : View, R> thenMapWithViewOrCancel(view: V, function: (V, T) -> R, requireAttachedToWindow: Boolean = true)
+    fun <V : View, R> thenMapWithViewOrCancel(view: V, requireAttachedToWindow: Boolean = true
+        , function: (V, T) -> R)
     : APromise<R> {
 
         val viewRef = WeakReference(view)
@@ -217,8 +219,8 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     /** rejects the entire promise if the view became null */
-    fun <V : View, R> thenAwaitWithViewOrReject(view: V, function: (V, T) -> Promise<R>
-            , requireAttachedToWindow: Boolean = true
+    fun <V : View, R> thenAwaitWithViewOrReject(view: V, requireAttachedToWindow: Boolean = true
+        , function: (V, T) -> Promise<R>
     ) : APromise<R> {
 
         val viewRef = WeakReference(view)
@@ -232,8 +234,8 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     /** cancels the entire promise if the view became null */
-    fun <V : View, R> thenAwaitWithViewOrCancel(view: V, function: (V, T) -> Promise<R>
-            , requireAttachedToWindow: Boolean = true
+    fun <V : View, R> thenAwaitWithViewOrCancel(view: V, requireAttachedToWindow: Boolean = true
+        , function: (V, T) -> Promise<R>
     ) : APromise<R> {
 
         val viewRef = WeakReference(view)
@@ -289,8 +291,8 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     /** skips (only) this consumer if the view became null */
-    fun <V : View> catchIgnoreWithView(view: V, consumer: (V, Throwable) -> Unit
-             , requireAttachedToWindow: Boolean = true
+    fun <V : View> catchIgnoreWithView(view: V, requireAttachedToWindow: Boolean = true
+        , consumer: (V, Throwable) -> Unit
     ): APromise<Unit> {
 
         val viewRef = WeakReference(view)
@@ -320,8 +322,8 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     }
 
     /** skips this consumer (only) if the view became null */
-    fun <V : View> finallyWithView(view: V, consumer: (V, Boolean) -> Unit
-          , requireAttachedToWindow: Boolean = true
+    fun <V : View> finallyWithView(view: V, requireAttachedToWindow: Boolean = true
+        , consumer: (V, Boolean) -> Unit
     ) : APromise<T> {
 
         val viewRef = WeakReference(view)
