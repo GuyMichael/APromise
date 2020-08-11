@@ -347,6 +347,10 @@ open class APromise<T>(single: Single<T>) : Promise<T>(single) {
     /* Promise override START */
     //overridden methods are just for casting the response type to APromise
 
+    override fun tag(tag: String): APromise<T> {
+        return super.tag(tag) as APromise<T>
+    }
+
     override fun <R> thenAwait(function: Function<T, Promise<R>>, executeOn: Scheduler?, resumeOn: Scheduler?): APromise<R> {
         return super.thenAwait(function, executeOn, resumeOn) as APromise<R>
     }

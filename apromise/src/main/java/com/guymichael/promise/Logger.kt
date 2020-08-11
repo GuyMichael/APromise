@@ -43,21 +43,37 @@ object Logger {
 
 
 
+    fun iLazy(tag: String, messageSupplier: () -> String) {
+        mLogger?.takeIf { it.shouldLogI() }?.i(tag, messageSupplier())
+    }
+
+    fun dLazy(tag: String, messageSupplier: () -> String) {
+        mLogger?.takeIf { it.shouldLogD() }?.d(tag, messageSupplier())
+    }
+
+    fun wLazy(tag: String, messageSupplier: () -> String) {
+        mLogger?.takeIf { it.shouldLogW() }?.i(tag, messageSupplier())
+    }
+
+    fun eLazy(tag: String, messageSupplier: () -> String) {
+        mLogger?.takeIf { it.shouldLogE() }?.e(tag, messageSupplier())
+    }
+
 
     fun iLazy(cls: Class<*>, messageSupplier: () -> String) {
-        mLogger?.takeIf { it.shouldLogI() }?.i(cls.simpleName, messageSupplier())
+        iLazy(cls.simpleName, messageSupplier)
     }
 
     fun dLazy(cls: Class<*>, messageSupplier: () -> String) {
-        mLogger?.takeIf { it.shouldLogD() }?.d(cls.simpleName, messageSupplier())
+        dLazy(cls.simpleName, messageSupplier)
     }
 
     fun wLazy(cls: Class<*>, messageSupplier: () -> String) {
-        mLogger?.takeIf { it.shouldLogW() }?.i(cls.simpleName, messageSupplier())
+        wLazy(cls.simpleName, messageSupplier)
     }
 
     fun eLazy(cls: Class<*>, messageSupplier: () -> String) {
-        mLogger?.takeIf { it.shouldLogE() }?.e(cls.simpleName, messageSupplier())
+        eLazy(cls.simpleName, messageSupplier)
     }
 }
 

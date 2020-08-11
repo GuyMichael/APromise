@@ -17,11 +17,13 @@ open class Promise<T>(single: Single<T>) {
     private var onErrorConsumer: Consumer<in Throwable>? = null
     private var asyncErrorConsumer: Consumer<in Throwable>? = null
     private var promiseSubscriber: Disposable? = null//held (always and only) by the last promise in the chain
+    var tag: String? = null
+        private set
     protected var disposeExecutor: () -> Unit = {
         promiseSubscriber?.also { ps ->
             if( !ps.isDisposed) {
                 ps.dispose()
-                Logger.w(this@Promise.javaClass, "Promise Cancelled. isResolved:$isResolved")
+                Logger.w(getLogTag(), "Promise Cancelled. isResolved:$isResolved")
             }
         }
     }
@@ -69,6 +71,10 @@ open class Promise<T>(single: Single<T>) {
         } ?: nextPromise
     }
 
+    private fun <S> passOnTag(nextPromise: Promise<S>): Promise<S> {
+        return nextPromise.also { np -> np.tag = this.tag }
+    }
+
     private fun <S> bindCancelExecution(nextPromise: Promise<S>): Promise<S> {
         return nextPromise.also {
             //when someone call cancel() on 'us', we want the next promise to be cancelled.
@@ -93,6 +99,7 @@ open class Promise<T>(single: Single<T>) {
         return createInstanceImpl(single)
             .let(::passOnErrorConsumer)
             .letIf({ bindCancel }, ::bindCancelExecution)
+            .let(::passOnTag)
             .let(::passOnExtraMembers)
     }
 
@@ -102,14 +109,14 @@ open class Promise<T>(single: Single<T>) {
         this.promiseSubscriber = this.single.subscribe(
             //on success
             {
-                Logger.dLazy(this@Promise.javaClass) {
+                Logger.dLazy(getLogTag()) {
                     "Promise resolved: ${if (it is Any) it.javaClass.simpleName else ""} : $it"
                 }
             },
 
             //on error
             { error ->
-                Logger.w(this@Promise.javaClass,
+                Logger.w(getLogTag(),
                     if (error is TimeoutException) "on timeout"
                     else "on error: ${error.javaClass}, ${error.message}"
                 )
@@ -119,7 +126,7 @@ open class Promise<T>(single: Single<T>) {
 
                     onErrorConsumer?.accept(error)
                         //or fail silently
-                        ?: Logger.e(this@Promise.javaClass, "uncaught error: ${error.message}").also {
+                        ?: Logger.e(getLogTag(), "uncaught error: ${error.message}").also {
                             error.printStackTrace()
                         }
                 }
@@ -161,8 +168,23 @@ open class Promise<T>(single: Single<T>) {
 
     protected open fun onPromiseError(e: Throwable) {}
 
+    protected open fun getLogTag(): String {
+        return if (this.tag.isNullOrBlank()) {
+            this.javaClass.simpleName
+        } else {
+            "${this.tag} (${this.javaClass.simpleName})"
+        }
+    }
 
 
+
+
+    /** Tags this promise for logging / analytics purposes */
+    open fun tag(tag: String): Promise<T> {
+        return this.also {
+            it.tag = tag
+        }
+    }
 
     open fun <R> thenAwait(function: Function<T, Promise<R>>
             , executeOn: Scheduler? = null, resumeOn: Scheduler? = null) : Promise<R> {
@@ -455,11 +477,11 @@ open class Promise<T>(single: Single<T>) {
     infix fun or(other: Promise<T>): Promise<T> {
         return createInstance(
             this.single.doOnSuccess {
-//                    Logger.w("Promise.or()", "this.doOnSuccess")
+//                    Logger.w(getLogTag(), "this.doOnSuccess")
                     other.cancel() //THINK check if !resolved?
 //                    other.cancelImmediately("Promise.or() - 'this' succeeded first - cancelling 'other'")
                 }.mergeWith(other.single.doOnSuccess {
-//                    Logger.w("Promise.or()", "other.doOnSuccess")
+//                    Logger.w(getLogTag(), "other.doOnSuccess")
                     this.cancel() //THINK check if !resolved?
 //                    this.cancelImmediately("Promise.or() - 'other' succeeded first - cancelling 'this'")
                 }).firstOrError() //rx Single 'or'
@@ -585,7 +607,7 @@ open class Promise<T>(single: Single<T>) {
         return this.single.map {
             if (predicate.test(it)) {
                 val reason: String? = logMessageSupplier?.invoke(it)?.also { reason ->
-                    Logger.w(this@Promise.javaClass, "Promise cancelled due to predicate, with reason: $reason")
+                    Logger.w(getLogTag(), "Promise cancelled due to predicate, with reason: $reason")
                 }
 
                 cancelImmediately(reason)
