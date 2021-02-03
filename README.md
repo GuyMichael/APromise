@@ -210,6 +210,97 @@ mView.waitForDetach().then { v ->
 Nice, isn't it? :)
 
 
+
+### Promise for API Handling
+
+A clear usage will be with network services, exactly like you'd use it in JavaScript.
+The complete Android library, [ReactiveApp](https://github.com/GuyMichael/ReactiveApp),
+uses [Retrofit](https://github.com/square/retrofit) as it's network library (will be replaced
+in the future with [Ktor](https://github.com/ktorio/ktor) to support Multiplatform). 
+
+Here is an (shortened) example of how to map Retrofit's `Call` type, which accepts a callback with
+the standard 'success' and 'onError' methods, to form APromise:
+```kotlin
+
+//we extend Retrofit's Callback to implement it's success and failure
+// callbacks and pass on to our promise, through a rx SingleEmitter
+class RetrofitApiCallback<T>(
+        private val emitter: SingleEmitter<T>
+    ): Callback<T> {
+
+    override fun onResponse(call: Call<T>, response: Response<T>) {
+        if (response.isSuccessful) {
+            emitter.onSuccess(response.body())
+        } else {
+            emitter.onError(...)
+        }
+    }
+
+    override fun onFailure(call: Call<T>, e: Throwable) {
+        emitter.onError(...)
+    } 
+}
+
+//now, we wrap Retrofit's Call with our promise
+inline fun <reified T : Any> promiseOfCall(call: Call<T>) : APromise<T> {
+
+        return APromise<T>(Single.create { emitter ->
+            if( !it.isDisposed) {
+                call.enqueue(RetrofitApiCallback(emitter))
+            }
+
+        //on promise cancel, cancel the Call
+        .catch { hadError = true }
+        .finally { resolved ->
+            if ( !resolved && !hadError) {
+                Logger.d(ApiRequest::class, "API ${call::class.simpleName} is cancelling " +
+                    "due to promise cancel/dispose (" +
+                    "API ${(if (call.isExecuted) "already" else "is not")} executed)")
+
+                call.cancel()
+            }
+        }
+    }
+```
+Note: the example above is a simplified version. It is not meant to be used as is, nor
+does it compile (the Callback class)  
+
+Again, looks daunting at first, but it is already done for you
+in the ReactiveApp library, and from now on, API calls look like this instead, assuming
+`ApiNetflixTitlesGet` is some implementation of the Retrofit Call interface with a function `getTitles()`:
+```kotlin
+val rService = mRetrofit.create(ApiNetflixTitlesGet::class)
+
+promiseOfCall(rService.getTitles())
+   .then { res -> ... }
+   .catch { err -> ... }
+   .finally {}
+
+   //and we can chain API requests, clearly
+  .thenAwait { titles ->
+      promiseOfCall(rService.getTitleDetails(
+          titles[5]                            //get details of 5th title
+      ))
+  } 
+
+  //and we can launch a side effect API without waiting for it
+  .then { titleDetails ->
+      promiseOfCall(analyticsService.sendEvent(titleDetails.name)
+  }
+
+  //and we can wait for an Activity to destroy to clear the cache
+  .thenAwait(mActivity.waitForDestroy())   //an Activity extension that returns a promise, present in the library
+  .then { clearCache() }
+
+  //and then we can do another side effect API, 
+  // or cancel conditionally if a view is detached, 
+  // or run more API's with `all` and wait for all of them to finish, 
+  // or even wait for a Bluetooth connection or location update, wrapped with promises.
+  // We can, and should, do virtually anything using promise chaining
+} 
+```
+
+
 R8 / ProGuard
 --------
 
