@@ -1,6 +1,3 @@
-# APromise
-A Promise model implementation for kotlin (pure) and Android (APromise), built using rx (kotlin, android)
-
 APromise
 =====
 
