@@ -266,7 +266,7 @@ Note: the example above is a simplified version. It is not meant to be used as i
 does it compile (the Callback class)  
 
 Again, looks daunting at first, but it is already done for you
-in the ReactiveApp library, and from now on, API calls look like this instead, assuming
+in the ReactiveApp library, and from now on, API calls look something like this instead, assuming
 `ApiNetflixTitlesGet` is some implementation of the Retrofit Call interface with a function `getTitles()`:
 ```kotlin
 val rService = mRetrofit.create(ApiNetflixTitlesGet::class)
@@ -297,9 +297,10 @@ promiseOfCall(rService.getTitles())
   // or run more API's with `all` and wait for all of them to finish, 
   // or even wait for a Bluetooth connection or location update, wrapped with promises.
   // We can, and should, do virtually anything using promise chaining
-} 
+}.execute()
 ```
-
+Note: using the ReactiveApp library, calls will look slightly different, using
+an object class named ApiRequest / ApiController, [as can be seen here](https://github.com/GuyMichael/ReactiveAppExample/blob/master/app/src/main/java/com/guymichael/componentapplicationexample/logic/netflix/NetflixLogic.kt) 
 
 R8 / ProGuard
 --------
