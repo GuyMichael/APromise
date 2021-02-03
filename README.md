@@ -144,7 +144,70 @@ mActivity.finish()
 //View detached... 
 ```
 
+And for an Activity, using Kotlin extensions:
 
+```kotlin
+mActivity.waitForDestroy()    //returns a new APromise
+  .then {
+      println("mActivity is s now destroyed")
+  }
+  .execute()
+```
+
+
+### Custom Promises
+
+The `ViewUtils` public class contains useful promises, 
+such as `waitForDetach(view: V)` and `isAlive(view: View)`.
+`waitForDetach` is a good example of how to create your custom promise
+using a good old callback. In this case, Android's `View.OnAttachStateChangeListener` is used
+to wait for a `View` to detach, like so:
+
+```kotlin
+fun <V : View> waitForDetach(view: V): APromise<V> {
+        val viewRef = WeakReference(view)
+
+        return APromise.ofCallback<V, View.OnAttachStateChangeListener>({ promiseCallback ->
+            //first argument to 'ofCallback' is the (underlying) listener/callback
+            // which is used to create our promise. 
+            // This listener will be forwarded to the second argument - a 'finally' callback,
+            // to clear this listener (in this case, remove from the view)
+
+            //create Android's listener
+            val attachStateListener = View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) {}
+
+                //notify promise on success 
+                override fun onViewDetachedFromWindow(v: View) {
+                    promiseCallback.onSuccess(v as V)
+                }
+            }
+
+            //attach the Android listener to the view
+            view.addOnAttachStateChangeListener(attachStateListener )
+           
+            return attachStateListener
+        }
+
+            //second argument to the 'ofCallback' function is a callback
+            // called on 'finally', and destined to remove the listener
+        , {
+            //unregister (on success, rejections or cancelation) 
+            viewRef.get()?.removeOnAttachStateChangeListener(it)
+        }) 
+}
+```
+While this code looks big, it can be easily stretched (see original code in `VieeUtils`)
+to form a standardization of how a promise-from-callback looks like.
+Also, remember that this is a one-time effort. From now on, this whole tiresome view detach process looks
+like this (using this method as an extension to any `view`) :
+
+```kotlin
+mView.waitForDetach().then { v ->
+   //do something with v
+}.execute()
+```
+Nice, isn't it? :)
 
 
 R8 / ProGuard
