@@ -118,6 +118,35 @@ Promise.all(
     .execute() 
 ```
 
+
+### Android
+
+APromise can easily handle Context to automatically cancel or reject upon
+a Context destruction. You may provide a View or an Activity.
+
+Using a View, to automatically cancel the whole chain once the view is detached from window
+or it's Activity gets destroyed:
+```kotlin
+APromise.ofViewOrCancel(mView)
+    .delay(60000)
+    .finally { isResolved ->
+        println(
+           if (isResolved)
+               "View is alive for 60s "
+           else "View detached or context destroyed"
+        )
+    } 
+    .execute()
+
+mActivity.finish()
+
+//prints:
+//View detached... 
+```
+
+
+
+
 R8 / ProGuard
 --------
 
