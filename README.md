@@ -9,6 +9,11 @@ APromise makes it easy to to chain asynchronous actions, from simple to complex 
 and with callback chaining (success and cancelation) which is easy to use and control.
 APromise makes chaining actions predictable and effective.
 
+To import project using Gradle:
+```kotlin
+implementation 'com.github.GuyMichael:APromise:0.1.12'
+``` 
+
 In the (hopefully near) future, the underlying pure-kotlin Promise will
 be separated and serve an iOS implementation (IPromise) as well, 
 using Kotlin's Multiplatform abilities. 
@@ -53,18 +58,23 @@ Promise.ofAsync( { 5 } )  //creates Promise<Int>, from a supplier this time
                   //be computed until this the promise is executed
 ```
 
+
 ### Cancelations
 
 It is possible to cancel the promises, either directly or according to
 some computed condition:
 
 ```kotlin
-val mPromise = Promise.ofAsync( { 5 } )  //creates Promise<Int>, from a supplier this time
+val mPromise = Promise.ofAsync( { 5 } )
        .then {
            println("Promise started")
            it + 10
        }
        .delay(1000)
+       .thenMapOrCancel {     //returning 'null' will cancel the promise
+           if (it < 10) null
+           else it
+       }
        .finally { isResolved ->
            println(
                if (isResolved)
@@ -74,18 +84,39 @@ val mPromise = Promise.ofAsync( { 5 } )  //creates Promise<Int>, from a supplier
        }
        .execute()
 
-mPromise.cancel()
+mPromise.cancel() //cancel directly
 
 //prints:
 //Promise started
 //promise canceled (or rejected)
 ```
 
-To import project using Gradle:
+
+### Chaining Promises
+
 ```kotlin
-implementation 'com.github.GuyMichael:APromise:0.1.12'
+Promise.ofAsync( { 5 } )
+       .thenAwait {            //chain a new promise and also change type to Boolean
+           Promise.of(it == 5)
+       }
+       .then {
+           println("promise finished with $it") //'$it' will print 'true' 
+       }
+       .execute()
 ```
 
+You can also run multiple promises simultaneously and wait for all to finish:
+```kotlin
+Promise.all(
+        Promise.of(1)
+       , Promise.of(2)
+       , Promise.ofAsync( { 5 } )
+    )
+    .then {
+        println("All promised resolved")
+    }
+    .execute() 
+```
 
 R8 / ProGuard
 --------
