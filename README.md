@@ -9,7 +9,7 @@ APromise makes it easy to to chain asynchronous actions, from simple to complex 
 and with callback chaining (success and cancelation) which is easy to use and control.
 APromise makes chaining actions predictable and effective.
 
-To import project using Gradle:
+To import the project using Gradle:
 ```kotlin
 implementation 'com.github.GuyMichael:APromise:0.1.12'
 ``` 
@@ -250,9 +250,8 @@ inline fun <reified T : Any> promiseOfCall(call: Call<T>) : APromise<T> {
             }
 
         //on promise cancel, cancel the Call
-        .catch { hadError = true }
         .finally { resolved ->
-            if ( !resolved && !hadError) {
+            if ( !resolved) {
                 Logger.d(ApiRequest::class, "API ${call::class.simpleName} is cancelling " +
                     "due to promise cancel/dispose (" +
                     "API ${(if (call.isExecuted) "already" else "is not")} executed)")
