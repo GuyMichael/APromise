@@ -243,23 +243,25 @@ class RetrofitApiCallback<T>(
 
 //now, we wrap Retrofit's Call with our promise
 inline fun <reified T : Any> promiseOfCall(call: Call<T>) : APromise<T> {
+    //create a promise from a Single-of-emitter.
+    // the emitter is used by the RetrofitApiCallback to control the Single,
+    // which defines the promise
+    return APromise<T>(Single.create { emitter ->
+        if( !it.isDisposed) {
+            call.enqueue(RetrofitApiCallback(emitter))
+        }
 
-        return APromise<T>(Single.create { emitter ->
-            if( !it.isDisposed) {
-                call.enqueue(RetrofitApiCallback(emitter))
-            }
+    //on promise cancel, cancel the Call
+    .finally { resolved ->
+        if ( !resolved) {
+            Logger.d(ApiRequest::class, "API ${call::class.simpleName} is cancelling " +
+                "due to promise cancel/dispose (" +
+                "API ${(if (call.isExecuted) "already" else "is not")} executed)")
 
-        //on promise cancel, cancel the Call
-        .finally { resolved ->
-            if ( !resolved) {
-                Logger.d(ApiRequest::class, "API ${call::class.simpleName} is cancelling " +
-                    "due to promise cancel/dispose (" +
-                    "API ${(if (call.isExecuted) "already" else "is not")} executed)")
-
-                call.cancel()
-            }
+            call.cancel()
         }
     }
+}
 ```
 Note: the example above is a simplified version. It is not meant to be used as is, nor
 does it compile (the Callback class)  
