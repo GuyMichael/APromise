@@ -66,23 +66,23 @@ some computed condition:
 
 ```kotlin
 val mPromise = Promise.ofAsync( { 5 } )
-       .then {
-           println("Promise started")
-           it + 10
-       }
-       .delay(1000)
-       .thenMapOrCancel {     //returning 'null' will cancel the promise
-           if (it < 10) null
-           else it
-       }
-       .finally { isResolved ->
-           println(
-               if (isResolved)
-                   "promise finish after 1s delay"
-               else "promise canceled (or rejected)"
-           )
-       }
-       .execute()
+   .then {
+       println("Promise started")
+       it + 10
+   }
+   .delay(1000)
+   .thenMapOrCancel {     //returning 'null' will cancel the promise
+       if (it < 10) null
+       else it
+   }
+   .finally { isResolved ->
+       println(
+           if (isResolved)
+               "promise finish after 1s delay"
+           else "promise canceled (or rejected)"
+       )
+   }
+   .execute()
 
 mPromise.cancel() //cancel directly
 
@@ -165,36 +165,36 @@ to wait for a `View` to detach, like so:
 
 ```kotlin
 fun <V : View> waitForDetach(view: V): APromise<V> {
-        val viewRef = WeakReference(view)
+    val viewRef = WeakReference(view)
 
-        return APromise.ofCallback<V, View.OnAttachStateChangeListener>({ promiseCallback ->
-            //first argument to 'ofCallback' is the (underlying) listener/callback
-            // which is used to create our promise. 
-            // This listener will be forwarded to the second argument - a 'finally' callback,
-            // to clear this listener (in this case, remove from the view)
+    return APromise.ofCallback<V, View.OnAttachStateChangeListener>({ promiseCallback ->
+        //first argument to 'ofCallback' is the (underlying) listener/callback
+        // which is used to create our promise. 
+        // This listener will be forwarded to the second argument - a 'finally' callback,
+        // to clear this listener (in this case, remove from the view)
 
-            //create Android's listener
-            val attachStateListener = View.OnAttachStateChangeListener {
-                override fun onViewAttachedToWindow(v: View) {}
+        //create Android's listener
+        val attachStateListener = View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {}
 
-                //notify promise on success 
-                override fun onViewDetachedFromWindow(v: View) {
-                    promiseCallback.onSuccess(v as V)
-                }
+            //notify promise on success 
+            override fun onViewDetachedFromWindow(v: View) {
+                promiseCallback.onSuccess(v as V)
             }
-
-            //attach the Android listener to the view
-            view.addOnAttachStateChangeListener(attachStateListener )
-           
-            return attachStateListener
         }
 
-            //second argument to the 'ofCallback' function is a callback
-            // called on 'finally', and destined to remove the listener
-        , {
-            //unregister (on success, rejections or cancelation) 
-            viewRef.get()?.removeOnAttachStateChangeListener(it)
-        }) 
+        //attach the Android listener to the view
+        view.addOnAttachStateChangeListener(attachStateListener )
+
+        return attachStateListener
+    }
+
+        //second argument to the 'ofCallback' function is a callback
+        // called on 'finally', and destined to remove the listener
+    , {
+        //unregister (on success, rejections or cancelation) 
+        viewRef.get()?.removeOnAttachStateChangeListener(it)
+    }) 
 }
 ```
 While this code looks big, it can be easily stretched (see original code in `VieeUtils`)
@@ -273,31 +273,31 @@ in the ReactiveApp library, and from now on, API calls look something like this 
 val rService = mRetrofit.create(ApiNetflixTitlesGet::class)
 
 promiseOfCall(rService.getTitles())
-   .then { res -> ... }
-   .catch { err -> ... }
-   .finally {}
+    .then { res -> ... }
+    .catch { err -> ... }
+    .finally {}
 
-   //and we can chain API requests, clearly
-  .thenAwait { titles ->
+    //and we can chain API requests, clearly
+    .thenAwait { titles ->
       promiseOfCall(rService.getTitleDetails(
           titles[5]                            //get details of 5th title
       ))
-  } 
+    } 
 
-  //and we can launch a side effect API without waiting for it
-  .then { titleDetails ->
+    //and we can launch a side effect API without waiting for it
+    .then { titleDetails ->
       promiseOfCall(analyticsService.sendEvent(titleDetails.name)
-  }
+    }
 
-  //and we can wait for an Activity to destroy to clear the cache
-  .thenAwait(mActivity.waitForDestroy())   //an Activity extension that returns a promise, present in the library
-  .then { clearCache() }
+    //and we can wait for an Activity to destroy to clear the cache
+    .thenAwait(mActivity.waitForDestroy())   //an Activity extension that returns a promise, present in the library
+    .then { clearCache() }
 
-  //and then we can do another side effect API, 
-  // or cancel conditionally if a view is detached, 
-  // or run more API's with `all` and wait for all of them to finish, 
-  // or even wait for a Bluetooth connection or location update, wrapped with promises.
-  // We can, and should, do virtually anything using promise chaining
+    //and then we can do another side effect API, 
+    // or cancel conditionally if a view is detached, 
+    // or run more API's with `all` and wait for all of them to finish, 
+    // or even wait for a Bluetooth connection or location update, wrapped with promises.
+    // We can, and should, do virtually anything using promise chaining
 }.execute()
 ```
 Note: using the ReactiveApp library, calls will look slightly different, using
