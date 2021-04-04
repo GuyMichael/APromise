@@ -7,9 +7,9 @@ import org.junit.Test
 import org.junit.Assert.*
 import java.util.concurrent.TimeUnit
 
-class ExampleUnitTest {
+class CheckOrderUnitTest {
     @Test
-    fun check_order() {
+    fun check_order_simple() {
         Promise.of(mutableListOf(1))
             .then { it += 2 }
             .thenAwait({

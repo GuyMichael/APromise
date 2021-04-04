@@ -64,7 +64,7 @@ afterEvaluate {
 
                 // You can then customize attributes of the publication as shown below.
                 groupId = 'com.guymichael.apromise'
-                artifactId = 'final'
+                artifactId = 'apromise'
                 version = '1.0'
             }
             // Creates a Maven publication called “debug”.
@@ -73,7 +73,7 @@ afterEvaluate {
                 from components.debug
 
                 groupId = 'com.guymichael.apromise'
-                artifactId = 'final-debug'
+                artifactId = 'apromise-debug'
                 version = '1.0'
             }
         }
