@@ -11,7 +11,7 @@ APromise makes chaining actions predictable and effective.
 
 To import the project using Gradle:
 ```kotlin
-implementation 'com.github.GuyMichael:APromise:0.1.12'
+implementation 'com.github.GuyMichael.apromise:apromise:0.1.19'
 ``` 
 
 In the (hopefully near) future, the underlying pure-kotlin Promise will
